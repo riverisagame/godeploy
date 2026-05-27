@@ -26,3 +26,5 @@ godeployer/test_mock_dir/
 # IDE 配置
 .idea/
 .vscode/
+
+build/

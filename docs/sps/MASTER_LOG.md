@@ -22,11 +22,12 @@
 | 20260527 | ARCH-007 | RBAC_WEBHOOKS | docs/sps/decisions/20260527_m2_rbac_webhooks.md | COMPLETED |
 | 20260527 | MILESTONE-3 | NOTIFIER | docs/sps/decisions/20260527_m3_notifier_scan.md | COMPLETED |
 | 2026-05-27 | M2: Role-based Access | `api.go`, `db.go` | `docs/sps/plans/20260527_m2_rbac_ir.md` | COMPLETED |
-| 2026-05-27 | M3: Webhook & Notify  | `api.go`, `notifier.go` | `docs/sps/plans/20260527_m3_webhook_ir.md` | COMPLETED |
-| 2026-05-27 | M4: Scheduler/Queueing | `engine.go`, `api.go` | `docs/sps/plans/20260527_m4_scheduler_ir.md` | COMPLETED |
-| 2026-05-27 | M5: Multi-Node Deploy | `engine.go` | `docs/sps/decisions/20260527_m5_multinode_scan.md` | COMPLETED |
-| 2026-05-27 | M6: Frontend WS & UI | `web/src`, `api.go` | `docs/sps/plans/20260527_m6_frontend_ir.md` | COMPLETED |
-| 2026-05-27 | M7: Frontend Test Suite | `web/`, `.github/` | `docs/sps/plans/20260527_m7_frontend_test_ir.md` | COMPLETED |
+| 2026-05-27 | M3: Webhook & Notify  | `api.go`, `notifier.go` | `docs/sps/plans/20260527_m3_webhook_ir.md` | VERIFIED_AND_DEPLOYED |
+| 2026-05-27 | M4: Scheduler/Queueing | `engine.go`, `api.go` | `docs/sps/plans/20260527_m4_scheduler_ir.md` | VERIFIED_AND_DEPLOYED |
+| 2026-05-27 | M5: Multi-Node Deploy | `engine.go` | `docs/sps/decisions/20260527_m5_multinode_scan.md` | VERIFIED_AND_DEPLOYED |
+| 2026-05-27 | M6: Frontend WS & UI | `web/src`, `api.go` | `docs/sps/plans/20260527_m6_frontend_ir.md` | VERIFIED_AND_DEPLOYED |
+| 2026-05-27 | M7: Frontend Test Suite | `web/`, `.github/` | `docs/sps/plans/20260527_m7_frontend_test_ir.md` | VERIFIED_AND_DEPLOYED |
+| 2026-05-27 | M5-TestFix | godeployer | `docs/sps/plans/20260527_m5_testfix_ir.md` | VERIFIED_AND_DEPLOYED |
 | 2026-05-27 | CI: GitHub Actions | `.github/` | `docs/sps/plans/20260527_m7_ci_ir.md` | COMPLETED |
-| 2026-05-27 | M1: SSH Pool Refactor | `ssh.go`, `engine.go` | `docs/sps/plans/20260527_m1_ssh_pool_ir.md` | COMPLETED |
-| 2026-05-27 | M8: Delivery Scripts | `.github/`, `scripts/`, `docs/` | `docs/sps/plans/20260527_m8_delivery_ir.md` | COMPLETED |
+| 2026-05-27 | M1: SSH Pool Refactor | `ssh.go`, `engine.go` | `docs/sps/plans/20260527_m1_ssh_pool_ir.md` | VERIFIED_AND_DEPLOYED |
+| 2026-05-27 | M8: Delivery Scripts | `.github/`, `scripts/`, `docs/` | `docs/sps/plans/20260527_m8_delivery_ir.md` | VERIFIED_AND_DEPLOYED |
