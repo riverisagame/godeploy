@@ -404,7 +404,7 @@ func TestAPI_GetTaskDiff_RaceCondition(t *testing.T) {
 // TestAPI_GithubWebhook 验证 Github Webhook 的签名校验与防抖逻辑。
 // @Ref: docs/sps/plans/20260527_nanoplan_m2_rbac_webhooks.md
 func TestAPI_GithubWebhook(t *testing.T) {
-	r, _, cleanup := SetupTestRouter(t)
+	r, db, cleanup := SetupTestRouter(t)
 	defer cleanup()
 
 	// 构造 Github Push Payload
@@ -425,16 +425,16 @@ func TestAPI_GithubWebhook(t *testing.T) {
 		t.Errorf("expected 201 for valid webhook, got %d (body: %s)", w.Code, w.Body.String())
 	}
 
-	// 再次发送相同的请求，预期触发防抖（因为之前启动的任务仍是 pending/deploying 状态）
-	// 这里我们需要将第一步触发的任务置为 deploying，以模拟它正在运行
-	db, err := godeployer.InitDB(fmt.Sprintf("file:mem_%d?mode=memory&cache=shared", time.Now().UnixNano()))
-	if err == nil {
-		db.Exec("UPDATE deploy_tasks SET status = 'deploying' WHERE commit_id = 'commit-webhook-1'")
-	}
+	// 为了测试防抖，我们直接往数据库插入一条针对 commit-webhook-2 且状态为 deploying 的任务
+	db.Exec(`INSERT INTO deploy_tasks (project_id, env_id, commit_id, status, release_name, user_id, username, created_at) 
+		VALUES ('test-app', 'testing', 'commit-webhook-2', 'deploying', '20260527123456', 1, 'admin', ?)`, time.Now())
 
-	req2, _ := http.NewRequest("POST", "/api/webhooks/github/test-app/testing", bytes.NewBuffer([]byte(payload)))
+	payload2 := `{"ref": "refs/heads/main", "after": "commit-webhook-2"}`
+	mac2 := godeployer.ComputeGithubSignature([]byte(payload2), "secret123")
+
+	req2, _ := http.NewRequest("POST", "/api/webhooks/github/test-app/testing", bytes.NewBuffer([]byte(payload2)))
 	req2.Header.Set("Content-Type", "application/json")
-	req2.Header.Set("X-Hub-Signature-256", "sha256="+mac)
+	req2.Header.Set("X-Hub-Signature-256", "sha256="+mac2)
 	w2 := httptest.NewRecorder()
 	r.ServeHTTP(w2, req2)
 
