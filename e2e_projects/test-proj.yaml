@@ -1,0 +1,18 @@
+id: "e2e-project-1"
+name: "E2E Test Project"
+repo: "git@github.com:mock/e2e-app.git"
+environments:
+  - id: "testing"
+    name: "Testing Env"
+    servers:
+      - host: "127.0.0.1"
+        port: 22
+        user: "runner"
+        deploy_to: "/tmp/e2e-deploy-test"
+  - id: "production"
+    name: "Production Env"
+    servers:
+      - host: "127.0.0.1"
+        port: 22
+        user: "runner"
+        deploy_to: "/tmp/e2e-deploy-prod"

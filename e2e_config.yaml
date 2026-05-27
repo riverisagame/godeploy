@@ -2,3 +2,4 @@ global:
   server_port: 8081
   jwt_secret: "e2e_super_secret"
   sqlite_path: "file::memory:?cache=shared"
+project_config_dir: "./e2e_projects"

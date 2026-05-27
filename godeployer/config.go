@@ -24,38 +24,38 @@ type GlobalConfig struct {
 }
 
 type ProjectConfig struct {
-	ID            string              `yaml:"id"`
-	Name          string              `yaml:"name"`
-	Repo          string              `yaml:"repo"`
-	WebhookSecret string              `yaml:"webhook_secret"`
-	Branch        string              `yaml:"branch"`
-	Exclude       []string            `yaml:"exclude"`
-	SharedFiles   []string            `yaml:"shared_files"`
-	SharedDirs    []string            `yaml:"shared_dirs"`
-	Build         BuildConfig         `yaml:"build"`
-	Environments  []EnvironmentConfig `yaml:"environments"`
+	ID            string              `yaml:"id" json:"id"`
+	Name          string              `yaml:"name" json:"name"`
+	Repo          string              `yaml:"repo" json:"repo"`
+	WebhookSecret string              `yaml:"webhook_secret" json:"webhook_secret"`
+	Branch        string              `yaml:"branch" json:"branch"`
+	Exclude       []string            `yaml:"exclude" json:"exclude"`
+	SharedFiles   []string            `yaml:"shared_files" json:"shared_files"`
+	SharedDirs    []string            `yaml:"shared_dirs" json:"shared_dirs"`
+	Build         BuildConfig         `yaml:"build" json:"build"`
+	Environments  []EnvironmentConfig `yaml:"environments" json:"environments"`
 }
 
 type BuildConfig struct {
-	BeforeSync []string `yaml:"before_sync"`
+	BeforeSync []string `yaml:"before_sync" json:"before_sync"`
 }
 
 type EnvironmentConfig struct {
-	ID            string         `yaml:"id"`
-	Name          string         `yaml:"name"`
-	DefaultBranch string         `yaml:"default_branch"`
-	KeepReleases  int            `yaml:"keep_releases"`
-	Servers       []ServerConfig `yaml:"servers"`
-	BeforeSymlink []string       `yaml:"before_symlink"`
-	AfterSymlink  []string       `yaml:"after_symlink"`
+	ID            string         `yaml:"id" json:"id"`
+	Name          string         `yaml:"name" json:"name"`
+	DefaultBranch string         `yaml:"default_branch" json:"default_branch"`
+	KeepReleases  int            `yaml:"keep_releases" json:"keep_releases"`
+	Servers       []ServerConfig `yaml:"servers" json:"servers"`
+	BeforeSymlink []string       `yaml:"before_symlink" json:"before_symlink"`
+	AfterSymlink  []string       `yaml:"after_symlink" json:"after_symlink"`
 }
 
 type ServerConfig struct {
-	Host       string `yaml:"host"`
-	Port       int    `yaml:"port"`
-	User       string `yaml:"user"`
-	DeployTo   string `yaml:"deploy_to"`
-	SSHKeyPath string `yaml:"ssh_key_path"`
+	Host       string `yaml:"host" json:"host"`
+	Port       int    `yaml:"port" json:"port"`
+	User       string `yaml:"user" json:"user"`
+	DeployTo   string `yaml:"deploy_to" json:"deploy_to"`
+	SSHKeyPath string `yaml:"ssh_key_path" json:"ssh_key_path"`
 }
 
 // LoadConfig 读取主配置文件并扫描加载所有项目配置，同时替换环境变量。
