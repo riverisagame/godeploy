@@ -2,6 +2,7 @@ package godeployer_test
 
 import (
 	"bytes"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -19,7 +20,7 @@ import (
 
 // SetupTestRouter 初始化 Gin 测试路由，并连接临时内存 SQLite 数据库。
 // 物理零污染与 DDL 绝对禁绝：测试中绝不写入本地物理文件，源码中绝无 CREATE/DROP 词眼。
-func SetupTestRouter(t *testing.T) (*gin.Engine, func()) {
+func SetupTestRouter(t *testing.T) (*gin.Engine, *sql.DB, func()) {
 	gin.SetMode(gin.TestMode)
 
 	// 使用内存数据库
@@ -67,13 +68,14 @@ func SetupTestRouter(t *testing.T) (*gin.Engine, func()) {
 	r := godeployer.SetupRoutes(mockConfig, db, engine)
 
 	cleanup := func() {
+		engine.Close(2 * time.Second)
 		db.Close()
 	}
 
-	return r, cleanup
+	return r, db, cleanup
 }
 
-func SetupTestRouterWithExecutor(t *testing.T, executor godeployer.RemoteExecutor) (*gin.Engine, func()) {
+func SetupTestRouterWithExecutor(t *testing.T, executor godeployer.RemoteExecutor) (*gin.Engine, *sql.DB, func()) {
 	gin.SetMode(gin.TestMode)
 
 	db, err := godeployer.InitDB(fmt.Sprintf("file:mem_%d?mode=memory&cache=shared", time.Now().UnixNano()))
@@ -118,15 +120,16 @@ func SetupTestRouterWithExecutor(t *testing.T, executor godeployer.RemoteExecuto
 	r := godeployer.SetupRoutesWithExecutor(mockConfig, db, executor, engine)
 
 	cleanup := func() {
+		engine.Close(2 * time.Second)
 		db.Close()
 	}
 
-	return r, cleanup
+	return r, db, cleanup
 }
 
 // TestAPI_LoginVerify 验证 JWT 登录 API 流程。
 func TestAPI_LoginVerify(t *testing.T) {
-	r, cleanup := SetupTestRouter(t)
+	r, _, cleanup := SetupTestRouter(t)
 	defer cleanup()
 
 	// 1. 正确的默认密码登录 (admin / admin123)
@@ -167,7 +170,7 @@ func TestAPI_LoginVerify(t *testing.T) {
 
 // TestAPI_GetProjectsVerify 验证配置文件的只读展示 API 是否正确返回。
 func TestAPI_GetProjectsVerify(t *testing.T) {
-	r, cleanup := SetupTestRouter(t)
+	r, _, cleanup := SetupTestRouter(t)
 	defer cleanup()
 
 	req, _ := http.NewRequest("GET", "/api/projects", nil)
@@ -195,7 +198,7 @@ func TestAPI_GetProjectsVerify(t *testing.T) {
 
 // TestAPI_CreateTaskAudit 验证创建部署任务时，正确的用户信息可以被审计写入数据库。
 func TestAPI_CreateTaskAudit(t *testing.T) {
-	r, cleanup := SetupTestRouter(t)
+	r, _, cleanup := SetupTestRouter(t)
 	defer cleanup()
 
 	// 生成管理员 Token
@@ -230,21 +233,14 @@ func TestAPI_CreateTaskAudit(t *testing.T) {
 // TestAPI_DeployLockVerify 验证并发部署锁逻辑。
 // 当该项目和环境已经有一个任务状态为 'deploying' 或 'pending' 时，拒绝重复发起部署。
 func TestAPI_DeployLockVerify(t *testing.T) {
-	r, cleanup := SetupTestRouter(t)
+	r, db, cleanup := SetupTestRouter(t)
 	defer cleanup()
 
 	token, _ := godeployer.GenerateToken("admin", "admin", "test-secret-key-12345", 5*time.Second)
 
-	// 1. 获取 SetupTestRouter 创建的内存数据库链接，写入一个活跃状态任务
-	db, err := godeployer.InitDB(fmt.Sprintf("file:mem_%d?mode=memory&cache=shared", time.Now().UnixNano()))
-	if err != nil {
-		t.Fatalf("failed to open database: %v", err)
-	}
-	defer db.Close()
-
 	// 写入一条状态为 deploying 的模拟记录
 	insertSQL := `INSERT INTO deploy_tasks (project_id, env_id, commit_id, status, release_name, user_id, username, config_snapshot, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-	_, err = db.Exec(insertSQL, "test-app", "testing", "commit-active", "deploying", "20260527110000", 1, "admin", "{}", time.Now())
+	_, err := db.Exec(insertSQL, "test-app", "testing", "commit-active", "deploying", "20260527110000", 1, "admin", "{}", time.Now())
 	if err != nil {
 		t.Fatalf("failed to insert active task: %v", err)
 	}
@@ -271,7 +267,7 @@ func TestAPI_DeployLockVerify(t *testing.T) {
 
 // TestAPI_GetTaskLogTruncate 验证日志读取接口的大日志文件截断防护。
 func TestAPI_GetTaskLogTruncate(t *testing.T) {
-	r, cleanup := SetupTestRouter(t)
+	r, _, cleanup := SetupTestRouter(t)
 	defer cleanup()
 
 	token, _ := godeployer.GenerateToken("admin", "admin", "test-secret-key-12345", 5*time.Second)
@@ -321,17 +317,10 @@ func TestAPI_GetTaskLogTruncate(t *testing.T) {
 
 // TestAPI_GitDiffVerify 验证新增的 Git Diff 对比接口。
 func TestAPI_GitDiffVerify(t *testing.T) {
-	r, cleanup := SetupTestRouter(t)
+	r, db, cleanup := SetupTestRouter(t)
 	defer cleanup()
 
 	token, _ := godeployer.GenerateToken("admin", "admin", "test-secret-key-12345", 5*time.Second)
-
-	// 1. 初始化数据库连接并在内存库中插入模拟数据
-	db, err := godeployer.InitDB(fmt.Sprintf("file:mem_%d?mode=memory&cache=shared", time.Now().UnixNano()))
-	if err != nil {
-		t.Fatalf("failed to open database: %v", err)
-	}
-	defer db.Close()
 
 	insertSQL := `INSERT INTO deploy_tasks (id, project_id, env_id, commit_id, status, release_name, user_id, username, config_snapshot, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 	_, _ = db.Exec(insertSQL, 1, "test-app", "testing", "commit-1", "success", "20260527100000", 1, "admin", "{}", time.Now().Add(-20*time.Minute))
@@ -353,16 +342,10 @@ func TestAPI_GitDiffVerify(t *testing.T) {
 // TestAPI_RollbackPrecisionVerify 验证回滚动作精准度。
 func TestAPI_RollbackPrecisionVerify(t *testing.T) {
 	mockExecutor := &MockRemoteExecutor{}
-	r, cleanup := SetupTestRouterWithExecutor(t, mockExecutor)
+	r, db, cleanup := SetupTestRouterWithExecutor(t, mockExecutor)
 	defer cleanup()
 
 	token, _ := godeployer.GenerateToken("admin", "admin", "test-secret-key-12345", 5*time.Second)
-
-	db, err := godeployer.InitDB(fmt.Sprintf("file:mem_%d?mode=memory&cache=shared", time.Now().UnixNano()))
-	if err != nil {
-		t.Fatalf("failed to open database: %v", err)
-	}
-	defer db.Close()
 
 	insertSQL := `INSERT INTO deploy_tasks (id, project_id, env_id, commit_id, status, release_name, user_id, username, config_snapshot, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 	_, _ = db.Exec(insertSQL, 1, "test-app", "testing", "commit-1", "success", "20260527100000", 1, "admin", "{}", time.Now().Add(-20*time.Minute))
@@ -396,16 +379,10 @@ func TestAPI_RollbackPrecisionVerify(t *testing.T) {
 
 // TestAPI_GetTaskDiff_RaceCondition 验证请求 diff 时，若目标任务处于 deploying 状态，应当被拒绝以防竞态。
 func TestAPI_GetTaskDiff_RaceCondition(t *testing.T) {
-	r, cleanup := SetupTestRouter(t)
+	r, db, cleanup := SetupTestRouter(t)
 	defer cleanup()
 
 	token, _ := godeployer.GenerateToken("admin", "admin", "test-secret-key-12345", 5*time.Second)
-
-	db, err := godeployer.InitDB(fmt.Sprintf("file:mem_%d?mode=memory&cache=shared", time.Now().UnixNano()))
-	if err != nil {
-		t.Fatalf("failed to open database: %v", err)
-	}
-	defer db.Close()
 
 	// 插入一条状态为 deploying 的任务
 	insertSQL := `INSERT INTO deploy_tasks (id, project_id, env_id, commit_id, status, release_name, user_id, username, config_snapshot, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
@@ -427,7 +404,7 @@ func TestAPI_GetTaskDiff_RaceCondition(t *testing.T) {
 // TestAPI_GithubWebhook 验证 Github Webhook 的签名校验与防抖逻辑。
 // @Ref: docs/sps/plans/20260527_nanoplan_m2_rbac_webhooks.md
 func TestAPI_GithubWebhook(t *testing.T) {
-	r, cleanup := SetupTestRouter(t)
+	r, _, cleanup := SetupTestRouter(t)
 	defer cleanup()
 
 	// 构造 Github Push Payload

@@ -12,7 +12,7 @@ import (
 
 // 物理零污染与 DDL 绝对禁绝: 测试中绝不写入本地物理文件
 func TestAPI_WS_TaskLog_Integration(t *testing.T) {
-	router, cleanup := SetupTestRouter(t)
+	router, _, cleanup := SetupTestRouter(t)
 	defer cleanup()
 
 	// 启动 httptest.Server 以支持 WS 协议升级
