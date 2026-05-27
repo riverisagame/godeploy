@@ -1,0 +1,84 @@
+name: GoDeployer CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  backend-test:
+    name: Backend Tests (Go)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.20'
+          cache: true
+
+      - name: Run Go Tests
+        run: go test -v -race ./...
+
+  frontend-unit:
+    name: Frontend Unit Tests (Vitest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: './web/package-lock.json'
+
+      - name: Install Dependencies
+        working-directory: ./web
+        run: npm ci
+
+      - name: Run Vitest
+        working-directory: ./web
+        run: npm run test
+
+  e2e-test:
+    name: E2E Tests (Playwright)
+    needs: [backend-test, frontend-unit]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Go (for backend api)
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.20'
+          cache: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: './web/package-lock.json'
+
+      - name: Install Frontend Dependencies
+        working-directory: ./web
+        run: npm ci
+
+      - name: Install Playwright Browsers
+        working-directory: ./web
+        run: npx playwright install --with-deps
+
+      - name: Run Playwright Tests
+        working-directory: ./web
+        run: npm run test:e2e
+
+      - name: Upload Playwright Report
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: playwright-report
+          path: web/playwright-report/
+          retention-days: 10
