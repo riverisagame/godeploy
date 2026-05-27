@@ -19,14 +19,21 @@ export default defineConfig({
     },
   ],
 
-  webServer: {
-    // 启动 Go 后端并在后台运行，同时启动 Vite 前端服务
-    command: '(cd .. && go run main.go --config=e2e_config.yaml) & npm run dev',
-    url: 'http://localhost:5173',
-    reuseExistingServer: !process.env.CI,
-    timeout: 120000,
-    env: {
-      BACKEND_PORT: '8081'
+  webServer: [
+    {
+      command: 'cd .. && go run main.go --config=e2e_config.yaml',
+      url: 'http://127.0.0.1:8081',
+      reuseExistingServer: !process.env.CI,
+      timeout: 120000,
+    },
+    {
+      command: 'npm run dev',
+      url: 'http://localhost:5173',
+      reuseExistingServer: !process.env.CI,
+      timeout: 120000,
+      env: {
+        BACKEND_PORT: '8081'
+      }
     }
-  },
+  ],
 });
