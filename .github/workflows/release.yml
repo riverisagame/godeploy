@@ -1,0 +1,64 @@
+name: Release Build
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - name: Build Frontend
+        run: |
+          cd web
+          npm ci
+          npm run build
+
+      - name: Setup Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.20'
+
+      - name: Build Binaries
+        run: |
+          mkdir -p dist
+          # Build for Linux amd64
+          GOOS=linux GOARCH=amd64 go build -o dist/godeployer-linux-amd64 .
+          # Build for Linux arm64
+          GOOS=linux GOARCH=arm64 go build -o dist/godeployer-linux-arm64 .
+          # Build for Windows amd64
+          GOOS=windows GOARCH=amd64 go build -o dist/godeployer-windows-amd64.exe .
+          # Build for macOS amd64
+          GOOS=darwin GOARCH=amd64 go build -o dist/godeployer-darwin-amd64 .
+          # Build for macOS arm64 (Apple Silicon)
+          GOOS=darwin GOARCH=arm64 go build -o dist/godeployer-darwin-arm64 .
+
+      - name: Create Release Archive
+        run: |
+          cd dist
+          tar -czvf godeployer-linux-amd64.tar.gz godeployer-linux-amd64
+          tar -czvf godeployer-linux-arm64.tar.gz godeployer-linux-arm64
+          zip godeployer-windows-amd64.zip godeployer-windows-amd64.exe
+          tar -czvf godeployer-darwin-amd64.tar.gz godeployer-darwin-amd64
+          tar -czvf godeployer-darwin-arm64.tar.gz godeployer-darwin-arm64
+
+      - name: Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            dist/godeployer-linux-amd64.tar.gz
+            dist/godeployer-linux-arm64.tar.gz
+            dist/godeployer-windows-amd64.zip
+            dist/godeployer-darwin-amd64.tar.gz
+            dist/godeployer-darwin-arm64.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

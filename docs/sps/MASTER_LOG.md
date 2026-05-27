@@ -28,4 +28,5 @@
 | 2026-05-27 | M6: Frontend WS & UI | `web/src`, `api.go` | `docs/sps/plans/20260527_m6_frontend_ir.md` | COMPLETED |
 | 2026-05-27 | M7: Frontend Test Suite | `web/`, `.github/` | `docs/sps/plans/20260527_m7_frontend_test_ir.md` | COMPLETED |
 | 2026-05-27 | CI: GitHub Actions | `.github/` | `docs/sps/plans/20260527_m7_ci_ir.md` | COMPLETED |
-| 2026-05-27 | M1: SSH Pool Refactor | `ssh.go`, `engine.go` | `docs/sps/plans/20260527_m1_ssh_pool_ir.md` | PLANNED |
+| 2026-05-27 | M1: SSH Pool Refactor | `ssh.go`, `engine.go` | `docs/sps/plans/20260527_m1_ssh_pool_ir.md` | COMPLETED |
+| 2026-05-27 | M8: Delivery Scripts | `.github/`, `scripts/`, `docs/` | `docs/sps/plans/20260527_m8_delivery_ir.md` | IMPLEMENTING |
