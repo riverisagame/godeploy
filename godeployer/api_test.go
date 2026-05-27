@@ -3,6 +3,7 @@ package godeployer_test
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"deploy/godeployer"
+
 	"github.com/gin-gonic/gin"
 )
 
@@ -21,7 +23,7 @@ func SetupTestRouter(t *testing.T) (*gin.Engine, func()) {
 	gin.SetMode(gin.TestMode)
 
 	// 使用内存数据库
-	db, err := godeployer.InitDB("file::memory:?cache=shared")
+	db, err := godeployer.InitDB(fmt.Sprintf("file:mem_%d?mode=memory&cache=shared", time.Now().UnixNano()))
 	if err != nil {
 		t.Fatalf("failed to init DB: %v", err)
 	}
@@ -74,7 +76,7 @@ func SetupTestRouter(t *testing.T) (*gin.Engine, func()) {
 func SetupTestRouterWithExecutor(t *testing.T, executor godeployer.RemoteExecutor) (*gin.Engine, func()) {
 	gin.SetMode(gin.TestMode)
 
-	db, err := godeployer.InitDB("file::memory:?cache=shared")
+	db, err := godeployer.InitDB(fmt.Sprintf("file:mem_%d?mode=memory&cache=shared", time.Now().UnixNano()))
 	if err != nil {
 		t.Fatalf("failed to init DB: %v", err)
 	}
@@ -234,7 +236,7 @@ func TestAPI_DeployLockVerify(t *testing.T) {
 	token, _ := godeployer.GenerateToken("admin", "admin", "test-secret-key-12345", 5*time.Second)
 
 	// 1. 获取 SetupTestRouter 创建的内存数据库链接，写入一个活跃状态任务
-	db, err := godeployer.InitDB("file::memory:?cache=shared")
+	db, err := godeployer.InitDB(fmt.Sprintf("file:mem_%d?mode=memory&cache=shared", time.Now().UnixNano()))
 	if err != nil {
 		t.Fatalf("failed to open database: %v", err)
 	}
@@ -325,7 +327,7 @@ func TestAPI_GitDiffVerify(t *testing.T) {
 	token, _ := godeployer.GenerateToken("admin", "admin", "test-secret-key-12345", 5*time.Second)
 
 	// 1. 初始化数据库连接并在内存库中插入模拟数据
-	db, err := godeployer.InitDB("file::memory:?cache=shared")
+	db, err := godeployer.InitDB(fmt.Sprintf("file:mem_%d?mode=memory&cache=shared", time.Now().UnixNano()))
 	if err != nil {
 		t.Fatalf("failed to open database: %v", err)
 	}
@@ -348,8 +350,6 @@ func TestAPI_GitDiffVerify(t *testing.T) {
 	}
 }
 
-
-
 // TestAPI_RollbackPrecisionVerify 验证回滚动作精准度。
 func TestAPI_RollbackPrecisionVerify(t *testing.T) {
 	mockExecutor := &MockRemoteExecutor{}
@@ -358,7 +358,7 @@ func TestAPI_RollbackPrecisionVerify(t *testing.T) {
 
 	token, _ := godeployer.GenerateToken("admin", "admin", "test-secret-key-12345", 5*time.Second)
 
-	db, err := godeployer.InitDB("file::memory:?cache=shared")
+	db, err := godeployer.InitDB(fmt.Sprintf("file:mem_%d?mode=memory&cache=shared", time.Now().UnixNano()))
 	if err != nil {
 		t.Fatalf("failed to open database: %v", err)
 	}
@@ -401,7 +401,7 @@ func TestAPI_GetTaskDiff_RaceCondition(t *testing.T) {
 
 	token, _ := godeployer.GenerateToken("admin", "admin", "test-secret-key-12345", 5*time.Second)
 
-	db, err := godeployer.InitDB("file::memory:?cache=shared")
+	db, err := godeployer.InitDB(fmt.Sprintf("file:mem_%d?mode=memory&cache=shared", time.Now().UnixNano()))
 	if err != nil {
 		t.Fatalf("failed to open database: %v", err)
 	}
@@ -432,7 +432,7 @@ func TestAPI_GithubWebhook(t *testing.T) {
 
 	// 构造 Github Push Payload
 	payload := `{"ref": "refs/heads/main", "after": "commit-webhook-1"}`
-	
+
 	// 计算真实的 HMAC SHA256 签名
 	mac := godeployer.ComputeGithubSignature([]byte(payload), "secret123")
 
@@ -450,7 +450,7 @@ func TestAPI_GithubWebhook(t *testing.T) {
 
 	// 再次发送相同的请求，预期触发防抖（因为之前启动的任务仍是 pending/deploying 状态）
 	// 这里我们需要将第一步触发的任务置为 deploying，以模拟它正在运行
-	db, err := godeployer.InitDB("file::memory:?cache=shared")
+	db, err := godeployer.InitDB(fmt.Sprintf("file:mem_%d?mode=memory&cache=shared", time.Now().UnixNano()))
 	if err == nil {
 		db.Exec("UPDATE deploy_tasks SET status = 'deploying' WHERE commit_id = 'commit-webhook-1'")
 	}
@@ -466,6 +466,3 @@ func TestAPI_GithubWebhook(t *testing.T) {
 		t.Errorf("expected 409 Conflict for concurrent webhook, got %d (body: %s)", w2.Code, w2.Body.String())
 	}
 }
-
-
-

@@ -420,18 +420,29 @@ const setupWebSocket = (taskId: number) => {
     wsConnection?.send(JSON.stringify({ type: 'auth', token }))
   }
 
+  let logBuffer = ''
+  let renderFrame: number | null = null
+
   wsConnection.onmessage = (event) => {
-    // 去除旧的 [Log truncated] 等前缀，因为 WS 是增量推
-    logText.value += event.data
-    scrollToBottom()
+    logBuffer += event.data
+    if (!renderFrame) {
+      renderFrame = window.requestAnimationFrame(() => {
+        logText.value += logBuffer
+        logBuffer = ''
+        renderFrame = null
+        scrollToBottom()
+      })
+    }
   }
 
   wsConnection.onerror = (error) => {
     console.error('WebSocket Error:', error)
+    if (renderFrame) cancelAnimationFrame(renderFrame)
     wsConnection?.close()
   }
 
   wsConnection.onclose = () => {
+    if (renderFrame) cancelAnimationFrame(renderFrame)
     // 如果任务仍在进行中，执行优雅降级（HTTP 轮询 fallback）
     const task = historyTasks.value.find(t => t.id === taskId)
     if (task && (task.status === 'pending' || task.status === 'deploying') && !logTimer) {

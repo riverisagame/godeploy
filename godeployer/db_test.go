@@ -2,6 +2,7 @@ package godeployer_test
 
 import (
 	"database/sql"
+	"fmt"
 	"os"
 	"testing"
 	"time"
@@ -15,7 +16,7 @@ import (
 func TestDB_InitVerify(t *testing.T) {
 	// 我们使用一个全新的独立内存数据库来测试，防止与其他测试并行时发生表冲突
 	dsn := "file:test_init_verify?mode=memory&cache=shared"
-	
+
 	// 初始化
 	db, err := godeployer.InitDB(dsn)
 	if err != nil {
@@ -50,7 +51,7 @@ func TestDB_SeedDefaultAdmin(t *testing.T) {
 	os.Setenv("ADMIN_PASSWORD", "custompwd123")
 	defer os.Unsetenv("ADMIN_PASSWORD")
 
-	dsn := "file::memory:?cache=shared"
+	dsn := fmt.Sprintf("file:mem_%d?mode=memory&cache=shared", time.Now().UnixNano())
 	db, err := godeployer.InitDB(dsn)
 	if err != nil {
 		t.Fatalf("InitDB failed: %v", err)
@@ -74,7 +75,7 @@ func TestDB_SeedDefaultAdmin(t *testing.T) {
 // 当检测到挂起在 'pending' 或 'deploying' 的任务时，应自动将其置为 'aborted'，而 'success' 则保持不变。
 // 物理零污染：仅在 sqlite 内存库中操作，且本文件内严禁出现任何违禁 DDL 词汇。
 func TestDB_StartupResilience(t *testing.T) {
-	dsn := "file::memory:?cache=shared"
+	dsn := fmt.Sprintf("file:mem_%d?mode=memory&cache=shared", time.Now().UnixNano())
 	db, err := godeployer.InitDB(dsn)
 	if err != nil {
 		t.Fatalf("InitDB failed: %v", err)
@@ -126,7 +127,7 @@ func TestDB_StartupResilience(t *testing.T) {
 // @Ref: docs/sps/plans/20260527_nanoplan_m2_rbac_webhooks.md
 func TestDB_Migration_Role(t *testing.T) {
 	dsn := "file:test_role_migration?mode=memory&cache=shared"
-	
+
 	// 1. 手动开启一个原始连接，创建"旧版"表结构（不含 role 字段）
 	rawDB, err := sql.Open("sqlite", dsn)
 	if err != nil {
@@ -146,7 +147,7 @@ func TestDB_Migration_Role(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create legacy users table: %v", err)
 	}
-	
+
 	// 重命名为 users，模拟旧系统
 	_, _ = rawDB.Exec("ALTER TABLE users_legacy RENAME TO users")
 

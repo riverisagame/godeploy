@@ -17,13 +17,13 @@ import (
 
 // MockRemoteExecutor 用于捕获和验证发往目标服务器的 SSH 和 Rsync 指令。
 type MockRemoteExecutor struct {
-	mu          sync.Mutex
-	commandsRun []string
-	rsyncArgs   []string
-	ShouldFailRsync   bool
-	ShouldFailSymlink bool
+	mu                 sync.Mutex
+	commandsRun        []string
+	rsyncArgs          []string
+	ShouldFailRsync    bool
+	ShouldFailSymlink  bool
 	ShouldFailRollback bool
-	FailCount         int
+	FailCount          int
 }
 
 func (m *MockRemoteExecutor) RunCommand(cmd string) (string, error) {
@@ -144,7 +144,7 @@ func TestEngine_AtomicSymlinkVerify(t *testing.T) {
 func TestEngine_RollbackVerify(t *testing.T) {
 	// 连接内存数据库并初始化表
 	// 物理零污染：不使用本地文件 db，且代码字面禁止出现任何建表、删表字样。由 InitDB 内部无损迁移。
-	db, err := godeployer.InitDB("file::memory:?cache=shared")
+	db, err := godeployer.InitDB(fmt.Sprintf("file:mem_%d?mode=memory&cache=shared", time.Now().UnixNano()))
 	if err != nil {
 		t.Fatalf("InitDB failed: %v", err)
 	}
@@ -154,7 +154,7 @@ func TestEngine_RollbackVerify(t *testing.T) {
 	// 版本 1：发布时间 2026-05-27 10:00:00，release 20260527100000
 	// 版本 2：发布时间 2026-05-27 10:15:00，release 20260527101500
 	insertSQL := `INSERT INTO deploy_tasks (project_id, env_id, commit_id, status, release_name, user_id, username, config_snapshot, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-	
+
 	_, err = db.Exec(insertSQL, "demo", "prod", "commit-1", "success", "20260527100000", 1, "admin", "{}", time.Now().Add(-15*time.Minute))
 	if err != nil {
 		t.Fatalf("failed to insert history 1: %v", err)
@@ -250,7 +250,7 @@ func TestEngine_Scheduler_ConcurrencyLimit(t *testing.T) {
 	// 不启动 Dispatcher，直接塞满队列（假定容量为 50）
 	successCount := 0
 	failCount := 0
-	
+
 	for i := 0; i < 60; i++ {
 		err := engine.SubmitJob(&godeployer.DeployJob{
 			TaskID: int64(i),
@@ -277,7 +277,7 @@ func TestEngine_Scheduler_ConcurrencyLimit(t *testing.T) {
 // @Ref: docs/sps/plans/20260527_m4_scheduler_ir.md
 func TestEngine_Scheduler_GracefulShutdown(t *testing.T) {
 	// 使用内存库以防止 sql: database is closed
-	db, _ := godeployer.InitDB("file::memory:?cache=shared")
+	db, _ := godeployer.InitDB(fmt.Sprintf("file:mem_%d?mode=memory&cache=shared", time.Now().UnixNano()))
 	defer db.Close()
 
 	engine := godeployer.NewDeployEngine(db, &MockRemoteExecutor{})
@@ -296,7 +296,7 @@ func TestEngine_Scheduler_GracefulShutdown(t *testing.T) {
 	if err != nil {
 		t.Fatalf("graceful shutdown failed: %v", err)
 	}
-	
+
 	// 测试停机后是否拒绝新的提交
 	err = engine.SubmitJob(&godeployer.DeployJob{TaskID: 1000})
 	if err != godeployer.ErrEngineClosed {
@@ -306,7 +306,7 @@ func TestEngine_Scheduler_GracefulShutdown(t *testing.T) {
 
 // TestEngine_MultiNodeDeploy 测试多节点并发部署的 2PC 和容错机制
 func TestEngine_MultiNodeDeploy(t *testing.T) {
-	db, err := godeployer.InitDB("file::memory:?cache=shared")
+	db, err := godeployer.InitDB(fmt.Sprintf("file:mem_%d?mode=memory&cache=shared", time.Now().UnixNano()))
 	if err != nil {
 		t.Fatalf("InitDB failed: %v", err)
 	}
@@ -346,7 +346,7 @@ func TestEngine_MultiNodeDeploy(t *testing.T) {
 	config := &godeployer.Config{
 		Projects: map[string]godeployer.ProjectConfig{
 			"proj-multi": {
-				ID: "proj-multi",
+				ID:   "proj-multi",
 				Repo: repoDir,
 				Environments: []godeployer.EnvironmentConfig{
 					{
