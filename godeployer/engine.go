@@ -1,0 +1,506 @@
+package godeployer
+
+import (
+	"bytes"
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+	"log"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"sync"
+	"time"
+)
+
+var (
+	ErrQueueFull    = errors.New("deploy queue is full")
+	ErrEngineClosed = errors.New("deploy engine is closed")
+)
+
+type DeployJob struct {
+	Ctx         context.Context
+	Cancel      context.CancelFunc
+	TaskID      int64
+	Config      *Config
+	LogFilePath string
+}
+
+type DeployEngine struct {
+	db       *sql.DB
+	executor RemoteExecutor
+
+	mu     sync.Mutex
+	queue  chan *DeployJob
+	wg     sync.WaitGroup
+	closed bool
+}
+
+func NewDeployEngine(db *sql.DB, executor RemoteExecutor) *DeployEngine {
+	return &DeployEngine{
+		db:       db,
+		executor: executor,
+		queue:    make(chan *DeployJob, 50),
+	}
+}
+
+// RunLocalBuild 在指定的构建工作区中依次执行前置构建命令。
+func (e *DeployEngine) RunLocalBuild(ctx context.Context, proj ProjectConfig, buildPath string) error {
+	for _, rawCmd := range proj.Build.BeforeSync {
+		if rawCmd == "" {
+			continue
+		}
+
+		var cmd *exec.Cmd
+		if runtime.GOOS == "windows" {
+			cmd = exec.Command("cmd", "/C", rawCmd)
+		} else {
+			cmd = exec.Command("sh", "-c", rawCmd)
+		}
+
+		cmd.Dir = buildPath
+		output, err := runCmd(ctx, cmd)
+		if err != nil {
+			return fmt.Errorf("command %q failed (output: %s): %w", rawCmd, string(output), err)
+		}
+	}
+	return nil
+}
+
+// SwitchSymlink 对目标服务器执行无空窗期的原子软链接切换。
+func (e *DeployEngine) SwitchSymlink(server ServerConfig, releaseName string) error {
+	executor := e.executor
+	if executor == nil {
+		executor = NewSSHExecutor(server)
+	}
+
+	releasesDir := filepath.ToSlash(filepath.Join(server.DeployTo, "releases"))
+	newReleasePath := filepath.ToSlash(filepath.Join(releasesDir, releaseName))
+	tempSymlinkPath := filepath.ToSlash(filepath.Join(server.DeployTo, "current_temp"))
+	currentSymlinkPath := filepath.ToSlash(filepath.Join(server.DeployTo, "current"))
+
+	// 1 & 2. 创建临时软链接并原子重命名覆盖 current 链接
+	linkCmd := fmt.Sprintf("ln -sfn %s %s && mv -Tf %s %s", newReleasePath, tempSymlinkPath, tempSymlinkPath, currentSymlinkPath)
+	if _, err := executor.RunCommand(linkCmd); err != nil {
+		return fmt.Errorf("failed to create temporary symlink: %w", err)
+	}
+
+	return nil
+}
+
+// RunRollbackToTask 将指定项目和环境的目标服务器回滚到指定的任务 ID 对应的 Release 版本。
+// @Ref: docs/sps/plans/20260527_nanoplan_tdd_enhanced.md | @Date: 2026-05-27
+func (e *DeployEngine) RunRollbackToTask(targetTaskID int64, server ServerConfig) error {
+	if e.db == nil {
+		return fmt.Errorf("database connection is required for rollback")
+	}
+
+	// 查询目标任务的 release_name 并校验是否为成功状态
+	querySQL := `
+		SELECT release_name 
+		FROM deploy_tasks 
+		WHERE id = ? AND status = 'success'`
+	
+	var releaseName string
+	err := e.db.QueryRow(querySQL, targetTaskID).Scan(&releaseName)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return fmt.Errorf("specified task is not a successful release or does not exist")
+		}
+		return fmt.Errorf("failed to query rollback version: %w", err)
+	}
+
+	// 将目标服务器软链接切换到对应版本
+	if err := e.SwitchSymlink(server, releaseName); err != nil {
+		return fmt.Errorf("rollback symlink switch failed: %w", err)
+	}
+
+	// 更新目标任务的状态为已回滚 (仅作标记)
+	updateSQL := `
+		UPDATE deploy_tasks 
+		SET status = 'rolled_back' 
+		WHERE id = ?`
+	if _, err := e.db.Exec(updateSQL, targetTaskID); err != nil {
+		return fmt.Errorf("database update failed but symlink rollback succeeded: %w", err)
+	}
+
+	return nil
+}
+
+// RunRollback 将指定项目和环境的目标服务器回滚到上一个成功的 Release 版本。
+// @Ref: docs/sps/plans/20260527_nanoplan_tdd_enhanced.md | @Date: 2026-05-27
+func (e *DeployEngine) RunRollback(projectID, envID string, server ServerConfig) error {
+	if e.db == nil {
+		return fmt.Errorf("database connection is required for rollback")
+	}
+
+	querySQL := `
+		SELECT id 
+		FROM deploy_tasks 
+		WHERE project_id = ? AND env_id = ? AND status = 'success' 
+		ORDER BY id DESC LIMIT 1 OFFSET 1`
+	
+	var prevTaskID int64
+	err := e.db.QueryRow(querySQL, projectID, envID).Scan(&prevTaskID)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return fmt.Errorf("no previous successful release found to rollback to")
+		}
+		return fmt.Errorf("failed to query rollback version: %w", err)
+	}
+
+	return e.RunRollbackToTask(prevTaskID, server)
+}
+
+// SubmitJob 提交部署任务到调度队列。如果队列满则立即返回 ErrQueueFull
+func (e *DeployEngine) SubmitJob(job *DeployJob) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.closed {
+		return ErrEngineClosed
+	}
+
+	select {
+	case e.queue <- job:
+		return nil
+	default:
+		return ErrQueueFull
+	}
+}
+
+// StartDispatcher 启动后台部署调度器
+func (e *DeployEngine) StartDispatcher(workers int) {
+	e.wg.Add(workers)
+	for i := 0; i < workers; i++ {
+		go func() {
+			defer e.wg.Done()
+			for job := range e.queue {
+				// 同步执行具体的部署流水线并捕获 Panic
+				func() {
+					if job.Cancel != nil {
+						defer job.Cancel()
+					}
+					defer func() {
+						if r := recover(); r != nil {
+							e.UpdateTaskStatus(job.TaskID, "failed")
+							log.Printf("Deployment panic for task %d: %v", job.TaskID, r)
+						}
+					}()
+					e.RunDeploy(job.Ctx, job.TaskID, job.Config, job.LogFilePath)
+				}()
+			}
+		}()
+	}
+}
+
+// Close 优雅停机，等待所有队列中的部署任务完成
+func (e *DeployEngine) Close(timeout time.Duration) error {
+	e.mu.Lock()
+	if e.closed {
+		e.mu.Unlock()
+		return nil
+	}
+	e.closed = true
+	close(e.queue)
+	e.mu.Unlock()
+
+	done := make(chan struct{})
+	go func() {
+		e.wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		return nil
+	case <-time.After(timeout):
+		return fmt.Errorf("timeout waiting for DeployEngine to close")
+	}
+}
+
+// RunDeploy 触发完整的部署流水线（用于后台异步运行）
+func (e *DeployEngine) RunDeploy(ctx context.Context, taskID int64, config *Config, logFilePath string) {
+	if closer, ok := e.executor.(interface{ Close() error }); ok {
+		defer closer.Close()
+	}
+
+	// 从数据库查询任务信息
+	var projectID, envID, commitID, releaseName string
+	err := e.db.QueryRow("SELECT project_id, env_id, commit_id, release_name FROM deploy_tasks WHERE id = ?", taskID).
+		Scan(&projectID, &envID, &commitID, &releaseName)
+	if err != nil {
+		log.Printf("[Task %d] Failed to query task: %v", taskID, err)
+		e.UpdateTaskStatus(taskID, "failed")
+		return
+	}
+
+	e.UpdateTaskStatus(taskID, "deploying")
+
+	// 打开日志文件用于输出构建细节
+	logFile, err := os.OpenFile(logFilePath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+	if err != nil {
+		log.Printf("[Task %d] Failed to create log file: %v", taskID, err)
+	} else {
+		defer logFile.Close()
+	}
+
+	var logMu sync.Mutex
+	writeLog := func(format string, args ...interface{}) {
+		logMu.Lock()
+		defer logMu.Unlock()
+		msg := fmt.Sprintf("[%s] "+format+"\n", append([]interface{}{time.Now().Format("2006-01-02 15:04:05")}, args...)...)
+		log.Print(msg)
+		if logFile != nil {
+			_, _ = logFile.WriteString(msg)
+		}
+	}
+
+	proj, exists := config.Projects[projectID]
+	if !exists {
+		writeLog("Error: project config %s not found", projectID)
+		e.UpdateTaskStatus(taskID, "failed")
+		return
+	}
+
+	var targetEnv *EnvironmentConfig
+	for _, env := range proj.Environments {
+		if env.ID == envID {
+			targetEnv = &env
+			break
+		}
+	}
+
+	if targetEnv == nil {
+		writeLog("Error: environment config %s not found", envID)
+		e.UpdateTaskStatus(taskID, "failed")
+		return
+	}
+
+	// 1. 本地检出目录建立
+	buildPath := filepath.Join(config.Global.WorkspacePath, projectID, releaseName)
+	writeLog("Step 1: Cloning repository from %s into %s...", proj.Repo, buildPath)
+	
+	if err := os.MkdirAll(filepath.Dir(buildPath), 0755); err != nil {
+		writeLog("Error: failed to create workspace dir: %v", err)
+		e.UpdateTaskStatus(taskID, "failed")
+		return
+	}
+
+	// 执行 git clone
+	// @Ref: docs/sps/plans/20260527_nanoplan_resilience.md | @Date: 2026-05-27
+	cloneCmd := exec.Command("git", "clone", proj.Repo, buildPath)
+	if output, err := runCmd(ctx, cloneCmd); err != nil {
+		writeLog("Error: git clone failed: %v (output: %s)", err, string(output))
+		e.UpdateTaskStatus(taskID, "failed")
+		return
+	}
+
+	// 切换到指定的分支/Commit
+	writeLog("Step 2: Checking out target commit/branch: %s...", commitID)
+	// @Ref: docs/sps/plans/20260527_nanoplan_resilience.md | @Date: 2026-05-27
+	checkoutCmd := exec.Command("git", "checkout", commitID)
+	checkoutCmd.Dir = buildPath
+	if output, err := runCmd(ctx, checkoutCmd); err != nil {
+		writeLog("Error: git checkout failed: %v (output: %s)", err, string(output))
+		e.UpdateTaskStatus(taskID, "failed")
+		return
+	}
+
+	// 2. 本地构建
+	writeLog("Step 3: Executing local build hooks...")
+	if err := e.RunLocalBuild(ctx, proj, buildPath); err != nil {
+		writeLog("Error: local build hooks failed: %v", err)
+		e.UpdateTaskStatus(taskID, "failed")
+		return
+	}
+
+	// 3. Phase 1: Rsync并发同步
+	// @Ref: docs/sps/plans/20260527_m5_multinode_ir.md | @Date: 2026-05-27
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 10)
+	var rsyncMu sync.Mutex
+	rsyncFailed := false
+
+	// 获取上一个成功版本，用作 Rsync link-dest 硬链接参考
+	var prevReleaseName string
+	prevSQL := `SELECT release_name FROM deploy_tasks WHERE project_id = ? AND env_id = ? AND status = 'success' ORDER BY id DESC LIMIT 1`
+	_ = e.db.QueryRow(prevSQL, projectID, envID).Scan(&prevReleaseName)
+
+	for _, srv := range targetEnv.Servers {
+		wg.Add(1)
+		go func(srv ServerConfig) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			writeLog("Step 4 [Phase1]: Synchronizing files to remote server %s:%d...", srv.Host, srv.Port)
+			executor := e.executor
+			if executor == nil {
+				executor = &SSHExecutor{Server: srv, Ctx: ctx}
+			}
+
+			// 检查目标机 releases 目录是否存在
+			releasesDir := filepath.ToSlash(filepath.Join(srv.DeployTo, "releases"))
+			mkCmd := fmt.Sprintf("mkdir -p %s", releasesDir)
+			if _, err := executor.RunCommand(mkCmd); err != nil {
+				writeLog("Error: failed to create remote releases directory on %s: %v", srv.Host, err)
+				rsyncMu.Lock()
+				rsyncFailed = true
+				rsyncMu.Unlock()
+				return
+			}
+
+			var absoluteLinkDest string
+			if prevReleaseName != "" {
+				absoluteLinkDest = filepath.ToSlash(filepath.Join(releasesDir, prevReleaseName))
+			}
+
+			remoteReleasePath := filepath.ToSlash(filepath.Join(releasesDir, releaseName)) + "/"
+			localBuildDir := buildPath + "/"
+
+			// 调用 Rsync
+			if err := executor.Rsync(localBuildDir, remoteReleasePath, absoluteLinkDest); err != nil {
+				writeLog("Error: Rsync failed on %s: %v", srv.Host, err)
+				rsyncMu.Lock()
+				rsyncFailed = true
+				rsyncMu.Unlock()
+				return
+			}
+		}(srv)
+	}
+
+	wg.Wait()
+	if rsyncFailed {
+		writeLog("Error: Phase 1 Rsync failed on one or more nodes. Halting deployment.")
+		e.UpdateTaskStatus(taskID, "failed")
+		return
+	}
+
+	// 4. Phase 2: Symlink并发切换与Hooks
+	// @Ref: docs/sps/plans/20260527_m5_multinode_ir.md | @Date: 2026-05-27
+	var symlinkMu sync.Mutex
+	shouldRollback := false
+
+	for _, srv := range targetEnv.Servers {
+		wg.Add(1)
+		go func(srv ServerConfig) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			writeLog("Step 5 [Phase2]: Switching active symlink on %s:%d...", srv.Host, srv.Port)
+			if err := e.SwitchSymlink(srv, releaseName); err != nil {
+				writeLog("Error: atomic symlink switch failed on %s: %v", srv.Host, err)
+				symlinkMu.Lock()
+				shouldRollback = true
+				symlinkMu.Unlock()
+				return
+			}
+
+			// 5. 执行后置 hook (不影响主流程)
+			if len(targetEnv.AfterSymlink) > 0 {
+				writeLog("Step 6: Executing after_symlink remote hooks on %s...", srv.Host)
+				executor := e.executor
+				if executor == nil {
+					executor = &SSHExecutor{Server: srv, Ctx: ctx}
+				}
+				for _, hook := range targetEnv.AfterSymlink {
+					if hook == "" {
+						continue
+					}
+					hookCmd := fmt.Sprintf("cd %s && %s", filepath.ToSlash(filepath.Join(srv.DeployTo, "current")), hook)
+					if out, err := executor.RunCommand(hookCmd); err != nil {
+						writeLog("Warning: after_symlink hook %q failed on %s (output: %s): %v", hook, srv.Host, out, err)
+					}
+				}
+			}
+		}(srv)
+	}
+
+	wg.Wait()
+
+	// 5. Phase 3: 分布式并发回滚保护
+	if shouldRollback {
+		writeLog("Error: Phase 2 Symlink switch failed. Triggering cluster-wide Rollback...")
+		var rbMu sync.Mutex
+		rollbackFailed := false
+
+		for _, srv := range targetEnv.Servers {
+			wg.Add(1)
+			go func(srv ServerConfig) {
+				defer wg.Done()
+				sem <- struct{}{}
+				defer func() { <-sem }()
+				
+				var rbReleaseName string
+				rbSQL := `SELECT release_name FROM deploy_tasks WHERE project_id = ? AND env_id = ? AND status = 'success' ORDER BY id DESC LIMIT 1`
+				if err := e.db.QueryRow(rbSQL, projectID, envID).Scan(&rbReleaseName); err != nil {
+					if err != sql.ErrNoRows {
+						writeLog("Rollback Error: failed to query last success release for %s: %v", srv.Host, err)
+						rbMu.Lock()
+						rollbackFailed = true
+						rbMu.Unlock()
+					}
+					return
+				}
+				
+				if err := e.SwitchSymlink(srv, rbReleaseName); err != nil {
+					writeLog("Rollback Error: failed to rollback symlink on %s: %v", srv.Host, err)
+					rbMu.Lock()
+					rollbackFailed = true
+					rbMu.Unlock()
+				}
+			}(srv)
+		}
+		wg.Wait()
+
+		if rollbackFailed {
+			writeLog("CRITICAL: Rollback failed on one or more nodes! Brain Split detected!")
+			e.UpdateTaskStatus(taskID, "critical_brain_split")
+		} else {
+			writeLog("Rollback successful. Marking task as failed.")
+			e.UpdateTaskStatus(taskID, "failed")
+		}
+		return
+	}
+
+	writeLog("Deployment completed successfully!")
+	e.UpdateTaskStatus(taskID, "success")
+}
+
+func (e *DeployEngine) UpdateTaskStatus(taskID int64, status string) {
+	_, err := e.db.Exec("UPDATE deploy_tasks SET status = ? WHERE id = ?", status, taskID)
+	if err != nil {
+		log.Printf("Failed to update task status in DB: %v", err)
+	}
+}
+
+// runCmd 是一个安全的本地命令执行包裹函数，解决 Windows/Linux 等平台在 Context 超时时无法彻底清退整个子进程树的问题。
+// @Ref: docs/sps/plans/20260527_nanoplan_resilience.md | @Date: 2026-05-27
+func runCmd(ctx context.Context, cmd *exec.Cmd) ([]byte, error) {
+	var buf bytes.Buffer
+	cmd.Stdout = &buf
+	cmd.Stderr = &buf
+
+	setProcessGroup(cmd)
+
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- cmd.Wait()
+	}()
+
+	select {
+	case <-ctx.Done():
+		killProcessGroup(cmd)
+		<-done // 确保资源完全释放
+		return buf.Bytes(), ctx.Err()
+	case err := <-done:
+		return buf.Bytes(), err
+	}
+}

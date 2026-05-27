@@ -1,0 +1,6 @@
+{
+  "name": "demo-app",
+  "scripts": {
+    "build": "mkdir -p dist && echo 'compiled-vue-output' > dist/index.html"
+  }
+}

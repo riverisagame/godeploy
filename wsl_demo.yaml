@@ -1,0 +1,19 @@
+id: "demo-project"
+name: "WSL Demo App"
+repo: "/home/dan/demo-src"
+exclude:
+  - ".git"
+build:
+  before_sync:
+    - "npm run build"
+environments:
+  - id: "testing"
+    name: "WSL Local Testing"
+    default_branch: "master"
+    keep_releases: 3
+    servers:
+      - host: "localhost"
+        port: 22
+        user: "dan"
+        deploy_to: "/home/dan/demo-deploy"
+        ssh_key_path: "/home/dan/.ssh/id_rsa"

@@ -1,0 +1,8 @@
+global:
+  sqlite_path: "/home/dan/godeployer.db"
+  log_path: "/home/dan/logs"
+  workspace_path: "/home/dan/workspace"
+  ssh_key_path: "/home/dan/.ssh/id_rsa"
+  server_port: 8080
+  jwt_secret: "wsl-jwt-key"
+project_config_dir: "/home/dan/projects.d"
