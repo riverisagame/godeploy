@@ -4,10 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"os"
 	"os/exec"
-	"sync"
-	"time"
 
 	"golang.org/x/crypto/ssh"
 )
@@ -22,69 +19,36 @@ type SSHExecutor struct {
 	Server ServerConfig
 	Ctx    context.Context // 增加可选的 Context 字段以实现超时控制对冲
 
-	client *ssh.Client
-	mu     sync.Mutex
+	pool *SSHPool
 }
 
-func NewSSHExecutor(server ServerConfig) *SSHExecutor {
-	return &SSHExecutor{Server: server}
+func NewSSHExecutor(server ServerConfig, pool *SSHPool) *SSHExecutor {
+	return &SSHExecutor{Server: server, pool: pool}
 }
 
-func (s *SSHExecutor) getClient() (*ssh.Client, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if s.client != nil {
-		// 简单起见，这里假设连接是活的。生产环境可以引入 keepalive 检查
-		return s.client, nil
-	}
-
-	// 读取私钥文件
-	key, err := os.ReadFile(s.Server.SSHKeyPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read private key: %w", err)
-	}
-
-	signer, err := ssh.ParsePrivateKey(key)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse private key: %w", err)
-	}
-
-	config := &ssh.ClientConfig{
-		User: s.Server.User,
-		Auth: []ssh.AuthMethod{
-			ssh.PublicKeys(signer),
-		},
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-		Timeout:         10 * time.Second,
-	}
-
-	addr := fmt.Sprintf("%s:%d", s.Server.Host, s.Server.Port)
-	client, err := ssh.Dial("tcp", addr, config)
-	if err != nil {
-		return nil, fmt.Errorf("failed to connect SSH server: %w", err)
-	}
-
-	s.client = client
-	return s.client, nil
-}
+// getClient 和 Close 方法已废弃，其职责由 SSHPool 接管
 
 func (s *SSHExecutor) Close() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.client != nil {
-		err := s.client.Close()
-		s.client = nil
-		return err
+	if s.pool != nil {
+		return s.pool.Close()
 	}
 	return nil
 }
 
 func (s *SSHExecutor) RunCommand(cmd string) (string, error) {
-	client, err := s.getClient()
+	if s.pool == nil {
+		return "", fmt.Errorf("SSH pool is not initialized")
+	}
+
+	client, err := s.pool.Get(s.Ctx)
 	if err != nil {
 		return "", err
 	}
+	// 执行完成后释放连接回池，如果有严重错误则传递 err，这里我们只捕获 session 错误
+	var connErr error
+	defer func() {
+		s.pool.Put(client, connErr)
+	}()
 
 	session, err := client.NewSession()
 	if err != nil {
@@ -108,6 +72,11 @@ func (s *SSHExecutor) RunCommand(cmd string) (string, error) {
 	if err != nil {
 		if s.Ctx != nil && s.Ctx.Err() != nil {
 			return string(stdout), fmt.Errorf("SSH command context canceled: %w", s.Ctx.Err())
+		}
+		// 根据 ssh 库，如果在连接断开时会报 EOF 或类似网络错误
+		// 为保险起见，若是命令本身的错误 (ExitError)，不废弃连接
+		if _, isExitErr := err.(*ssh.ExitError); !isExitErr {
+			connErr = err
 		}
 		return string(stdout), fmt.Errorf("failed to run command %q: %w", cmd, err)
 	}

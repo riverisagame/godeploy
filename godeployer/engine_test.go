@@ -330,7 +330,18 @@ func TestEngine_MultiNodeDeploy(t *testing.T) {
 	repoDir := t.TempDir()
 	_ = exec.Command("git", "init", repoDir).Run()
 	// commit an empty file to allow git checkout to succeed
-	_ = exec.Command("sh", "-c", "cd "+repoDir+" && git config user.email 'test@test.com' && git config user.name 'Test' && touch dummy && git config init.defaultBranch master && git add dummy && git commit -m 'init' && git branch -M master").Run()
+	runGit := func(args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repoDir
+		_ = cmd.Run()
+	}
+	runGit("config", "user.email", "test@test.com")
+	runGit("config", "user.name", "Test")
+	runGit("config", "init.defaultBranch", "master")
+	_ = os.WriteFile(filepath.Join(repoDir, "dummy"), []byte("dummy"), 0644)
+	runGit("add", "dummy")
+	runGit("commit", "-m", "init")
+	runGit("branch", "-M", "master")
 
 	config := &godeployer.Config{
 		Projects: map[string]godeployer.ProjectConfig{

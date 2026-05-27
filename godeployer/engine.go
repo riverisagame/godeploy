@@ -32,6 +32,9 @@ type DeployEngine struct {
 	db       *sql.DB
 	executor RemoteExecutor
 
+	pools  map[string]*SSHPool
+	poolMu sync.Mutex
+
 	mu     sync.Mutex
 	queue  chan *DeployJob
 	wg     sync.WaitGroup
@@ -43,8 +46,25 @@ func NewDeployEngine(db *sql.DB, executor RemoteExecutor) *DeployEngine {
 		db:       db,
 		executor: executor,
 		queue:    make(chan *DeployJob, 50),
+		pools:    make(map[string]*SSHPool),
 	}
 }
+
+func (e *DeployEngine) getPool(server ServerConfig) *SSHPool {
+	e.poolMu.Lock()
+	defer e.poolMu.Unlock()
+	if e.pools == nil {
+		e.pools = make(map[string]*SSHPool)
+	}
+	key := fmt.Sprintf("%s:%d", server.Host, server.Port)
+	if p, ok := e.pools[key]; ok {
+		return p
+	}
+	p := NewSSHPool(server, 10)
+	e.pools[key] = p
+	return p
+}
+
 
 // RunLocalBuild 在指定的构建工作区中依次执行前置构建命令。
 func (e *DeployEngine) RunLocalBuild(ctx context.Context, proj ProjectConfig, buildPath string) error {
@@ -73,7 +93,7 @@ func (e *DeployEngine) RunLocalBuild(ctx context.Context, proj ProjectConfig, bu
 func (e *DeployEngine) SwitchSymlink(server ServerConfig, releaseName string) error {
 	executor := e.executor
 	if executor == nil {
-		executor = NewSSHExecutor(server)
+		executor = NewSSHExecutor(server, e.getPool(server))
 	}
 
 	releasesDir := filepath.ToSlash(filepath.Join(server.DeployTo, "releases"))
@@ -338,7 +358,11 @@ func (e *DeployEngine) RunDeploy(ctx context.Context, taskID int64, config *Conf
 			writeLog("Step 4 [Phase1]: Synchronizing files to remote server %s:%d...", srv.Host, srv.Port)
 			executor := e.executor
 			if executor == nil {
-				executor = &SSHExecutor{Server: srv, Ctx: ctx}
+				executor = NewSSHExecutor(srv, e.getPool(srv))
+				// We attach Ctx directly to the struct if needed, but NewSSHExecutor returns a pointer, so we can't easily chain unless we mutate
+				if sshExec, ok := executor.(*SSHExecutor); ok {
+					sshExec.Ctx = ctx
+				}
 			}
 
 			// 检查目标机 releases 目录是否存在
@@ -404,7 +428,10 @@ func (e *DeployEngine) RunDeploy(ctx context.Context, taskID int64, config *Conf
 				writeLog("Step 6: Executing after_symlink remote hooks on %s...", srv.Host)
 				executor := e.executor
 				if executor == nil {
-					executor = &SSHExecutor{Server: srv, Ctx: ctx}
+					executor = NewSSHExecutor(srv, e.getPool(srv))
+					if sshExec, ok := executor.(*SSHExecutor); ok {
+						sshExec.Ctx = ctx
+					}
 				}
 				for _, hook := range targetEnv.AfterSymlink {
 					if hook == "" {

@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"golang.org/x/crypto/ssh"
 )
@@ -116,7 +117,9 @@ func BenchmarkSSHExecutor_RunCommand(b *testing.B) {
 		SSHKeyPath: keyPath,
 	}
 
-	executor := NewSSHExecutor(serverCfg)
+	pool := NewSSHPool(serverCfg, 1)
+	defer pool.Close()
+	executor := NewSSHExecutor(serverCfg, pool)
 	executor.Ctx = context.Background()
 
 	b.ResetTimer()
@@ -127,3 +130,91 @@ func BenchmarkSSHExecutor_RunCommand(b *testing.B) {
 		}
 	}
 }
+
+// TestSSHPool_AcquireRelease 验证连接池的获取、释放和超时机制
+func TestSSHPool_AcquireRelease(t *testing.T) {
+	addr, keyPath, cleanup := setupMockSSHServer(t)
+	defer cleanup()
+
+	host, portStr, _ := net.SplitHostPort(addr)
+	var port int
+	fmt.Sscanf(portStr, "%d", &port)
+
+	serverCfg := ServerConfig{
+		Host:       host,
+		Port:       port,
+		User:       "testuser",
+		SSHKeyPath: keyPath,
+	}
+
+	pool := NewSSHPool(serverCfg, 2)
+	defer pool.Close()
+
+	ctx := context.Background()
+
+	// 1. 获取两个连接
+	client1, err := pool.Get(ctx)
+	if err != nil {
+		t.Fatalf("Failed to get client1: %v", err)
+	}
+	client2, err := pool.Get(ctx)
+	if err != nil {
+		t.Fatalf("Failed to get client2: %v", err)
+	}
+
+	// 2. 第三次获取应该阻塞直到超时
+	ctxTimeout, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+	defer cancel()
+	_, err = pool.Get(ctxTimeout)
+	if err == nil {
+		t.Fatalf("Expected timeout error when pool is exhausted, got nil")
+	}
+
+	// 3. 释放一个连接后，应该能获取新连接
+	pool.Put(client1, nil)
+	client3, err := pool.Get(ctx)
+	if err != nil {
+		t.Fatalf("Failed to get client3 after release: %v", err)
+	}
+	
+	pool.Put(client2, nil)
+	pool.Put(client3, nil)
+}
+
+// BenchmarkSSHPool_Concurrent 压测多 goroutine 争抢连接
+func BenchmarkSSHPool_Concurrent(b *testing.B) {
+	addr, keyPath, cleanup := setupMockSSHServer(b)
+	defer cleanup()
+
+	host, portStr, _ := net.SplitHostPort(addr)
+	var port int
+	fmt.Sscanf(portStr, "%d", &port)
+
+	serverCfg := ServerConfig{
+		Host:       host,
+		Port:       port,
+		User:       "testuser",
+		SSHKeyPath: keyPath,
+	}
+
+	// 限制为 10 个并发连接
+	pool := NewSSHPool(serverCfg, 10)
+	defer pool.Close()
+
+	executor := &SSHExecutor{
+		Server: serverCfg,
+		Ctx:    context.Background(),
+		pool:   pool,
+	}
+
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			_, err := executor.RunCommand("echo test")
+			if err != nil {
+				b.Errorf("RunCommand in parallel failed: %v", err)
+			}
+		}
+	})
+}
+
