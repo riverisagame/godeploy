@@ -220,6 +220,7 @@ import { ref, onMounted, reactive, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import axios from 'axios'
+import { getStatusTagType, getStatusText, formatTime, buildWSUrl } from '../utils/deploy'
 
 const router = useRouter()
 const currentUser = ref(localStorage.getItem('username') || 'Admin')
@@ -336,30 +337,7 @@ const fetchHistory = async (projectId: string, envId: string) => {
   }
 }
 
-// 状态文字及标签处理器
-const getStatusTagType = (status: string) => {
-  switch (status) {
-    case 'success': return 'success'
-    case 'failed': return 'danger'
-    case 'pending': return 'warning'
-    case 'rolled_back': return 'info'
-    default: return 'info'
-  }
-}
-
-const getStatusText = (status: string) => {
-  switch (status) {
-    case 'success': return '部署成功'
-    case 'failed': return '部署失败'
-    case 'pending': return '部署中...'
-    case 'rolled_back': return '已回滚'
-    default: return status
-  }
-}
-
-const formatTime = (timeStr: string) => {
-  return new Date(timeStr).toLocaleString()
-}
+// 状态文字及标签处理器和时间格式化已提取到 utils/deploy.ts
 
 // 触发部署上线
 const triggerDeploy = async (env: Environment) => {
@@ -433,10 +411,9 @@ const checkTaskStatus = async (task: Task) => {
 // 建立 WebSocket 连接
 const setupWebSocket = (taskId: number) => {
   const token = localStorage.getItem('token') || ''
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
   // 开发环境下使用本地代理或硬编码
-  const host = window.location.host
-  wsConnection = new WebSocket(`${protocol}//${host}/api/ws/tasks/${taskId}/log`)
+  const wsUrl = buildWSUrl(window.location.protocol, window.location.host, taskId)
+  wsConnection = new WebSocket(wsUrl)
 
   wsConnection.onopen = () => {
     logText.value = 'WebSocket 连接已建立，等待日志流...\n'
