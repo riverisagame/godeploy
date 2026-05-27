@@ -26,3 +26,4 @@
 | 2026-05-27 | M4: Scheduler/Queueing | `engine.go`, `api.go` | `docs/sps/plans/20260527_m4_scheduler_ir.md` | COMPLETED |
 | 2026-05-27 | M5: Multi-Node Deploy | `engine.go` | `docs/sps/decisions/20260527_m5_multinode_scan.md` | COMPLETED |
 | 2026-05-27 | M6: Frontend WS & UI | `web/src`, `api.go` | `docs/sps/plans/20260527_m6_frontend_ir.md` | COMPLETED |
+| 2026-05-27 | M7: Frontend Test Suite | `web/`, `.github/` | `docs/sps/plans/20260527_m7_frontend_test_ir.md` | IN_PROGRESS |
