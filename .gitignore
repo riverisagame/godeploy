@@ -28,3 +28,33 @@ godeployer/test_mock_dir/
 .vscode/
 
 build/
+
+# ====================================================
+# Demo 运行时产物（不提交，每次由 demo.sh 生成）
+# ====================================================
+
+# Demo 数据库（运行时生成，含演示数据）
+demo_deployer.db
+
+# Demo 日志文件（由 gen_demo_logs.sh 生成）
+demo_logs/
+
+# Demo workspace 中克隆的第三方 git 仓库（体积大，不提交）
+# 由 demo.sh clone 命令自动克隆
+demo_workspace/gitee_demo/
+# 保留旧的 demo_workspace 子目录（如有历史发布目录）
+demo_workspace/backend-api/
+demo_workspace/frontend-web/
+
+# 临时测试文件
+payload.json
+test_api.js
+test_api.sh
+test_hash.go
+seed.sql
+seed_demo.go
+web/test_ui.cjs
+web/screenshot1_dashboard.png
+
+# 代码覆盖率报告
+coverage/

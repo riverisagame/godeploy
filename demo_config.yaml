@@ -1,0 +1,8 @@
+global:
+  sqlite_path: "./demo_deployer.db"
+  log_path: "./demo_logs"
+  workspace_path: "./demo_workspace"
+  ssh_key_path: "~/.ssh/id_rsa"
+  server_port: 8080
+  jwt_secret: "demo-secret"
+project_config_dir: "./demo_projects.d"

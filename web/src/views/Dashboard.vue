@@ -10,6 +10,12 @@
         <el-tag type="info" size="large" effect="plain" class="user-tag">
           <el-icon><User /></el-icon> {{ currentUser }}
         </el-tag>
+        <el-button v-if="userRole === 'admin'" type="primary" size="default" variant="text" @click="$router.push('/users')">
+          用户管理
+        </el-button>
+        <el-button type="primary" size="default" variant="text" @click="openSettings">
+          账号配置
+        </el-button>
         <el-button type="danger" size="default" variant="text" @click="handleLogout">
           退出登录
         </el-button>
@@ -42,7 +48,7 @@
           <div class="section-card proj-summary">
             <h3>{{ selectedProject.name }}</h3>
             <div class="repo-line">
-              <el-icon><GitCommit /></el-icon>
+              <el-icon><Link /></el-icon>
               <span>{{ selectedProject.repo }}</span>
             </div>
             <div class="exclude-line" v-if="selectedProject.exclude?.length">
@@ -96,28 +102,86 @@
                   <div class="card-header">触发部署</div>
                   
                   <el-form :model="deployForm" label-position="top">
-                    <el-form-item label="部署分支 / Tag / Commit">
-                      <el-input 
+                    <el-form-item label="发布目标类型">
+                      <el-radio-group v-model="deployForm.targetType" size="small">
+                        <el-radio-button label="branch">分支</el-radio-button>
+                        <el-radio-button label="tag">Tag</el-radio-button>
+                        <el-radio-button label="commit">历史 Commit</el-radio-button>
+                      </el-radio-group>
+                    </el-form-item>
+
+                    <el-form-item v-if="deployForm.targetType === 'branch' || deployForm.targetType === 'tag'" label="选择分支/Tag">
+                      <el-select 
                         v-model="deployForm.branch" 
-                        placeholder="例如: main, develop, v1.0.0" 
-                      />
+                        filterable 
+                        allow-create 
+                        placeholder="选择..."
+                        :loading="loadingRefs"
+                        style="width: 100%"
+                      >
+                        <el-option
+                          v-for="item in refsList.filter(r => r.type === deployForm.targetType)"
+                          :key="item.name"
+                          :label="item.name"
+                          :value="item.name"
+                        >
+                          <span style="float: left">{{ item.name }}</span>
+                          <span style="float: right; color: var(--el-text-color-secondary); font-size: 13px">{{ item.hash.substring(0,7) }}</span>
+                        </el-option>
+                      </el-select>
                     </el-form-item>
 
-                    <el-form-item label="Commit Hash (可选指定)">
-                      <el-input 
-                        v-model="deployForm.commit" 
-                        placeholder="留空则拉取分支最新提交" 
-                      />
-                    </el-form-item>
+                    <div v-if="deployForm.targetType === 'commit'" class="commit-filters" style="margin-bottom: 18px;">
+                      <el-row :gutter="10">
+                        <el-col :span="6">
+                          <el-select v-model="commitFilters.ref" placeholder="分支/Tag" size="small" @change="fetchCommits" clearable filterable style="width: 100%">
+                            <el-option v-for="item in refsList" :key="item.name" :label="item.name" :value="item.name"></el-option>
+                          </el-select>
+                        </el-col>
+                        <el-col :span="6">
+                          <el-input v-model="commitFilters.keyword" placeholder="搜 Message" size="small" @change="fetchCommits" clearable />
+                        </el-col>
+                        <el-col :span="6">
+                          <el-input v-model="commitFilters.author" placeholder="搜提交人" size="small" @change="fetchCommits" clearable />
+                        </el-col>
+                        <el-col :span="6">
+                          <el-input v-model="commitFilters.file" placeholder="搜文件(如 src/main)" size="small" @change="fetchCommits" clearable />
+                        </el-col>
+                      </el-row>
+                      <el-form-item label="选择 Commit" style="margin-top: 10px;">
+                        <el-select 
+                          v-model="deployForm.branch" 
+                          filterable 
+                          remote 
+                          :remote-method="searchCommits" 
+                          :loading="loadingCommits" 
+                          placeholder="选择 Commit..."
+                          style="width: 100%"
+                        >
+                          <el-option v-for="item in commitsList" :key="item.hash" :label="item.message" :value="item.hash">
+                            <div style="display: flex; justify-content: space-between; align-items: center;">
+                              <span style="max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ item.message }}</span>
+                              <span style="font-size: 12px; color: #888;">{{ item.author }} - {{ item.hash.substring(0,7) }}</span>
+                            </div>
+                          </el-option>
+                        </el-select>
+                      </el-form-item>
+                    </div>
 
-                    <el-button 
-                      type="primary" 
-                      size="large" 
-                      class="trigger-deploy-btn"
-                      @click="triggerDeploy(env)"
-                    >
-                      <el-icon><Upload /></el-icon> 触发上线
-                    </el-button>
+                    <div style="display: flex; gap: 10px; margin-top: 20px;">
+                      <el-button 
+                        type="primary" 
+                        size="large" 
+                        class="trigger-deploy-btn"
+                        @click="triggerDeploy(env)"
+                        style="flex: 1;"
+                      >
+                        <el-icon><Upload /></el-icon> 触发上线
+                      </el-button>
+                      <el-button size="large" @click="previewDeployDiff(env)" :loading="loadingPreviewDiff" style="flex: 1; margin-left: 0;">
+                        <el-icon><View /></el-icon> 预览 Diff
+                      </el-button>
+                    </div>
                   </el-form>
                 </div>
               </div>
@@ -207,16 +271,49 @@
     </el-dialog>
 
     <!-- Git Diff 差异对比弹窗 -->
-    <el-dialog v-model="diffVisible" title="Git 代码差异对比" width="80%">
-      <div class="diff-container">
-        <pre class="diff-pre">{{ diffText }}</pre>
+    <el-dialog v-model="diffVisible" title="Git 代码差异对比" fullscreen>
+      <div style="margin-bottom: 15px; display: flex; justify-content: flex-end;">
+        <el-radio-group v-model="diffFormat" size="small">
+          <el-radio-button label="line-by-line">竖向对比</el-radio-button>
+          <el-radio-button label="side-by-side">横向对比</el-radio-button>
+        </el-radio-group>
       </div>
+      <div class="diff-container dark-diff" style="height: calc(100vh - 120px); overflow-y: auto; background: #0d1117; padding: 16px; border-radius: 6px;" v-html="highlightedDiff">
+      </div>
+    </el-dialog>
+
+    <!-- 账号配置弹窗 -->
+    <el-dialog v-model="settingVisible" title="账号部署权限配置" width="500px">
+      <el-form :model="settingForm" label-width="120px" label-position="top">
+        <el-form-item label="启用白名单限制">
+          <el-switch v-model="settingForm.restrict_git_authors" />
+          <div style="font-size: 12px; color: #888; margin-top: 4px;">
+            开启后，你只能部署白名单作者提交的代码。
+          </div>
+        </el-form-item>
+        <el-form-item label="Git 作者白名单" v-if="settingForm.restrict_git_authors">
+          <el-input 
+            v-model="settingForm.bound_git_authors" 
+            placeholder="输入 Git Author 名称或邮箱，多个用逗号分隔" 
+            type="textarea"
+            :rows="3"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <span class="dialog-footer">
+          <el-button @click="settingVisible = false">取消</el-button>
+          <el-button type="primary" @click="saveSettings" :loading="savingSettings">保存配置</el-button>
+        </span>
+      </template>
     </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, reactive, nextTick } from 'vue'
+import { ref, onMounted, reactive, nextTick, computed } from 'vue'
+import { html } from 'diff2html'
+import 'diff2html/bundles/css/diff2html.min.css'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import axios from 'axios'
@@ -224,6 +321,7 @@ import { getStatusTagType, getStatusText, formatTime, buildWSUrl } from '../util
 
 const router = useRouter()
 const currentUser = ref(localStorage.getItem('username') || 'Admin')
+const userRole = ref(localStorage.getItem('role') || 'viewer')
 
 interface Server {
   host: string
@@ -263,9 +361,61 @@ const activeEnvTab = ref('')
 const historyTasks = ref<Task[]>([])
 
 const deployForm = reactive({
+  targetType: 'branch',
   branch: '',
   commit: ''
 })
+
+const commitFilters = reactive({
+  keyword: '',
+  author: '',
+  file: '',
+  ref: ''
+})
+const commitsList = ref<any[]>([])
+const loadingCommits = ref(false)
+
+const searchCommits = (query: string) => {
+  commitFilters.keyword = query
+  fetchCommits()
+}
+
+const fetchCommits = async () => {
+  if (!selectedProject.value) return
+  loadingCommits.value = true
+  try {
+    const res = await axios.get(`/api/projects/${selectedProject.value.id}/commits`, {
+      params: { q: commitFilters.keyword, author: commitFilters.author, file: commitFilters.file, ref: commitFilters.ref }
+    })
+    commitsList.value = res.data || []
+  } catch(err) {
+    console.error(err)
+  } finally {
+    loadingCommits.value = false
+  }
+}
+const loadingPreviewDiff = ref(false)
+
+const previewDeployDiff = async (env: Environment) => {
+  if (!selectedProject.value || !deployForm.branch) {
+    ElMessage.warning('请选择项目和上线版本')
+    return
+  }
+  loadingPreviewDiff.value = true
+  try {
+    // 假设用线上最新发布作为 from，这里简化为只比较当前提交本身（如果要线上最新，需要查询最后一次成功发布的 commit_id）
+    // 当前实现：from 为空时 git_cache 将默认比较 deployForm.branch 的内部修改（相当于 git show）
+    const res = await axios.get(`/api/projects/${selectedProject.value.id}/preview_diff`, {
+      params: { to: deployForm.branch }
+    })
+    diffText.value = res.data.diff || '无变更内容'
+    diffVisible.value = true
+  } catch(err) {
+    ElMessage.error('获取对比失败')
+  } finally {
+    loadingPreviewDiff.value = false
+  }
+}
 
 // 弹窗状态
 const logVisible = ref(false)
@@ -277,6 +427,31 @@ let wsConnection: WebSocket | null = null
 
 const diffVisible = ref(false)
 const diffText = ref('')
+const diffFormat = ref('side-by-side')
+
+const highlightedDiff = computed(() => {
+  if (!diffText.value) return ''
+  return html(diffText.value, {
+    drawFileList: true,
+    matching: 'lines',
+    outputFormat: diffFormat.value,
+  })
+})
+const refsList = ref<{name: string, type: string, hash: string}[]>([])
+const loadingRefs = ref(false)
+
+const fetchRefs = async (projectId: string) => {
+  loadingRefs.value = true
+  refsList.value = []
+  try {
+    const res = await axios.get(`/api/projects/${projectId}/refs`)
+    refsList.value = res.data || []
+  } catch (err) {
+    console.error('Failed to fetch refs', err)
+  } finally {
+    loadingRefs.value = false
+  }
+}
 
 onMounted(async () => {
   // 设置全局 Axios 统一携带 JWT
@@ -286,6 +461,43 @@ onMounted(async () => {
   }
   await fetchProjects()
 })
+
+// 账号设置逻辑
+const settingVisible = ref(false)
+const savingSettings = ref(false)
+const settingForm = reactive({
+  restrict_git_authors: false,
+  bound_git_authors: ''
+})
+
+const openSettings = async () => {
+  settingVisible.value = true
+  try {
+    const res = await axios.get(`/api/users/${currentUser.value}/git_binding`)
+    settingForm.restrict_git_authors = res.data.restrict_git_authors || false
+    settingForm.bound_git_authors = res.data.bound_git_authors || ''
+  } catch(err) {
+    console.error('获取配置失败', err)
+    ElMessage.error('无法加载账号配置，仅 Admin 角色可读取其他用户配置')
+  }
+}
+
+const saveSettings = async () => {
+  savingSettings.value = true
+  try {
+    await axios.put(`/api/users/${currentUser.value}/git_binding`, {
+      restrict_git_authors: settingForm.restrict_git_authors,
+      bound_git_authors: settingForm.bound_git_authors
+    })
+    ElMessage.success('配置保存成功')
+    settingVisible.value = false
+  } catch(err) {
+    console.error(err)
+    ElMessage.error('配置保存失败')
+  } finally {
+    savingSettings.value = false
+  }
+}
 
 const fetchProjects = async () => {
   try {
@@ -303,10 +515,13 @@ const selectProject = (proj: Project) => {
   selectedProject.value = proj
   if (proj.environments && proj.environments.length > 0) {
     activeEnvTab.value = proj.environments[0].id
+    deployForm.targetType = 'branch'
     deployForm.branch = proj.environments[0].default_branch || 'main'
     deployForm.commit = ''
     fetchHistory(proj.id, activeEnvTab.value)
   }
+  fetchRefs(proj.id)
+  fetchCommits()
 }
 
 const handleEnvTabChange = (envId: any) => {
@@ -806,6 +1021,161 @@ const handleLogout = () => {
   padding: 16px;
   height: 450px;
   overflow-y: auto;
+}
+
+/* ===== diff2html 黑色高对比度主题 ===== */
+.dark-diff :deep(.d2h-wrapper) {
+  color: #cdd9e5;
+}
+
+/* 文件头栏 */
+.dark-diff :deep(.d2h-file-header) {
+  background: #161b22;
+  border-bottom: 1px solid #30363d;
+  color: #cdd9e5;
+}
+.dark-diff :deep(.d2h-file-name) {
+  color: #79c0ff;
+  font-weight: 600;
+}
+
+/* 文件列表 */
+.dark-diff :deep(.d2h-file-list-wrapper) {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  margin-bottom: 12px;
+}
+.dark-diff :deep(.d2h-file-list-title) {
+  background: #1c2128;
+  color: #8b949e;
+  border-bottom: 1px solid #30363d;
+}
+.dark-diff :deep(.d2h-file-list li) {
+  border-bottom: 1px solid #21262d;
+}
+.dark-diff :deep(.d2h-file-list a) {
+  color: #79c0ff;
+}
+.dark-diff :deep(.d2h-file-list a:hover) {
+  color: #a5d6ff;
+}
+
+/* 代码表格 */
+.dark-diff :deep(.d2h-diff-table) {
+  background: #0d1117;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  overflow: hidden;
+}
+.dark-diff :deep(.d2h-code-line),
+.dark-diff :deep(.d2h-code-side-line) {
+  background: #0d1117;
+  color: #cdd9e5;
+  font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+/* 行号列 */
+.dark-diff :deep(.d2h-code-linenumber),
+.dark-diff :deep(.d2h-code-side-linenumber) {
+  background: #161b22 !important;
+  color: #484f58 !important;
+  border-right: 1px solid #30363d !important;
+  min-width: 44px;
+  user-select: none;
+}
+
+/* 新增行：深绿底色 + 亮绿文字 */
+.dark-diff :deep(.d2h-ins),
+.dark-diff :deep(.d2h-ins .d2h-code-line),
+.dark-diff :deep(.d2h-ins .d2h-code-side-line) {
+  background: #0f2a1e !important;
+  color: #3fb950 !important;
+}
+.dark-diff :deep(.d2h-ins .d2h-code-line-ctn),
+.dark-diff :deep(.d2h-ins .d2h-code-side-line-ctn) {
+  background: #0f2a1e !important;
+}
+.dark-diff :deep(.d2h-ins mark) {
+  background: #1a4a2a !important;
+  color: #56d364 !important;
+  border-radius: 2px;
+}
+.dark-diff :deep(.d2h-ins .d2h-code-linenumber),
+.dark-diff :deep(.d2h-ins .d2h-code-side-linenumber) {
+  background: #0a2216 !important;
+  color: #3fb950 !important;
+  border-right-color: #1a4a2a !important;
+}
+
+/* 删除行：深红底色 + 亮红文字 */
+.dark-diff :deep(.d2h-del),
+.dark-diff :deep(.d2h-del .d2h-code-line),
+.dark-diff :deep(.d2h-del .d2h-code-side-line) {
+  background: #2d1010 !important;
+  color: #f85149 !important;
+}
+.dark-diff :deep(.d2h-del .d2h-code-line-ctn),
+.dark-diff :deep(.d2h-del .d2h-code-side-line-ctn) {
+  background: #2d1010 !important;
+}
+.dark-diff :deep(.d2h-del mark) {
+  background: #5c1a1a !important;
+  color: #ff7b72 !important;
+  border-radius: 2px;
+}
+.dark-diff :deep(.d2h-del .d2h-code-linenumber),
+.dark-diff :deep(.d2h-del .d2h-code-side-linenumber) {
+  background: #200d0d !important;
+  color: #f85149 !important;
+  border-right-color: #5c1a1a !important;
+}
+
+/* info 行（@@ hunk header）*/
+.dark-diff :deep(.d2h-info),
+.dark-diff :deep(.d2h-info .d2h-code-line),
+.dark-diff :deep(.d2h-info .d2h-code-side-line) {
+  background: #161b22 !important;
+  color: #8b949e !important;
+  font-style: italic;
+}
+.dark-diff :deep(.d2h-info .d2h-code-linenumber),
+.dark-diff :deep(.d2h-info .d2h-code-side-linenumber) {
+  background: #161b22 !important;
+  border-right-color: #30363d !important;
+}
+
+/* 未变更行 */
+.dark-diff :deep(.d2h-cntx .d2h-code-line),
+.dark-diff :deep(.d2h-cntx .d2h-code-side-line),
+.dark-diff :deep(.d2h-cntx) {
+  background: #0d1117 !important;
+  color: #8b949e !important;
+}
+
+/* Side-by-side 分隔线 */
+.dark-diff :deep(.d2h-diff-side-col) {
+  border-right: 1px solid #30363d;
+}
+
+/* 文件展开标题 */
+.dark-diff :deep(.d2h-file-diff) {
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  margin-bottom: 16px;
+  overflow: hidden;
+}
+
+/* 滚动条暗色 */
+.dark-diff :deep(*)::-webkit-scrollbar {
+  height: 6px;
+  background: #161b22;
+}
+.dark-diff :deep(*)::-webkit-scrollbar-thumb {
+  background: #30363d;
+  border-radius: 3px;
 }
 
 .diff-pre {

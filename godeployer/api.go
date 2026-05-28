@@ -61,10 +61,26 @@ func SetupRoutesWithExecutor(config *Config, db *sql.DB, executor RemoteExecutor
 		viewerGrp.Use(RoleMiddleware("admin", "deployer", "viewer"))
 		{
 			viewerGrp.GET("/projects", handler.HandleGetProjects)
+			viewerGrp.GET("/projects/:id/refs", handler.HandleGetProjectRefs)
+			viewerGrp.GET("/projects/:id/commits", handler.HandleGetProjectCommits)
+			viewerGrp.GET("/projects/:id/preview_diff", handler.HandleGetProjectPreviewDiff)
 			viewerGrp.GET("/tasks", handler.HandleGetTasks)
 			viewerGrp.GET("/tasks/:id", handler.HandleGetTaskDetail)
 			viewerGrp.GET("/tasks/:id/log", handler.HandleGetTaskLog)
 			viewerGrp.GET("/tasks/:id/diff", handler.HandleGetTaskDiff)
+		}
+
+		// 管理员权限操作
+		adminGrp := protected.Group("/")
+		adminGrp.Use(RoleMiddleware("admin"))
+		{
+			adminGrp.GET("/users", handler.HandleGetUsers)
+			adminGrp.POST("/users", handler.HandleCreateUser)
+			adminGrp.PUT("/users/:username", handler.HandleUpdateUser)
+			adminGrp.DELETE("/users/:username", handler.HandleDeleteUser)
+			adminGrp.GET("/users/:username/git_binding", handler.HandleGetUserGitBinding)
+			adminGrp.PUT("/users/:username/git_binding", handler.HandleUpdateUserGitBinding)
+			adminGrp.PUT("/users/:username/permissions", handler.HandleUpdateUserPermissions)
 		}
 
 		// 部署操作权限：仅 admin 和 deployer 可访问
@@ -116,15 +132,371 @@ func (h *APIHandler) HandleLogin(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"token":    token,
 		"username": req.Username,
+		"role":     role,
 	})
 }
 
+// checkProjectAccess checks if a user is permitted to access a specific project.
+func (h *APIHandler) checkProjectAccess(username string, targetProjectID string) bool {
+	var permittedProjectsStr string
+	err := h.db.QueryRow("SELECT COALESCE(permitted_projects, '*') FROM users WHERE username = ?", username).Scan(&permittedProjectsStr)
+	if err != nil {
+		return false
+	}
+
+	permittedList := strings.Split(permittedProjectsStr, ",")
+	for _, p := range permittedList {
+		p = strings.TrimSpace(p)
+		if p == "*" || p == targetProjectID {
+			return true
+		}
+	}
+	return false
+}
+
 func (h *APIHandler) HandleGetProjects(c *gin.Context) {
-	projects := make([]ProjectConfig, 0, len(h.config.Projects))
+	usernameVal, exists := c.Get("username")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+	username := usernameVal.(string)
+
+	var permittedProjectsStr string
+	err := h.db.QueryRow("SELECT COALESCE(permitted_projects, '*') FROM users WHERE username = ?", username).Scan(&permittedProjectsStr)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "user not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to query user permissions"})
+		return
+	}
+
+	permittedList := strings.Split(permittedProjectsStr, ",")
+	permittedMap := make(map[string]bool)
+	for _, p := range permittedList {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			permittedMap[p] = true
+		}
+	}
+
+	projects := make([]ProjectConfig, 0)
 	for _, p := range h.config.Projects {
-		projects = append(projects, p)
+		if permittedMap["*"] || permittedMap[p.ID] {
+			projects = append(projects, p)
+		}
 	}
 	c.JSON(http.StatusOK, projects)
+}
+
+type UpdatePermissionsRequest struct {
+	PermittedProjects string `json:"permitted_projects"`
+}
+
+func (h *APIHandler) HandleUpdateUserPermissions(c *gin.Context) {
+	username := c.Param("username")
+	var req UpdatePermissionsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	var count int
+	if err := h.db.QueryRow("SELECT COUNT(*) FROM users WHERE username = ?", username).Scan(&count); err != nil || count == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+		return
+	}
+
+	_, err := h.db.Exec("UPDATE users SET permitted_projects = ? WHERE username = ?", req.PermittedProjects, username)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update permissions"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "permissions updated successfully"})
+}
+
+func (h *APIHandler) HandleGetProjectRefs(c *gin.Context) {
+	projectID := c.Param("id")
+	proj, ok := h.config.Projects[projectID]
+	if !ok {
+		c.JSON(http.StatusNotFound, gin.H{"error": "project not found"})
+		return
+	}
+
+	usernameVal, _ := c.Get("username")
+	if !h.checkProjectAccess(usernameVal.(string), projectID) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "access denied for this project"})
+		return
+	}
+
+	cmd := exec.CommandContext(c.Request.Context(), "git", "ls-remote", "--heads", "--tags", proj.Repo)
+	out, err := cmd.Output()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to get refs: %v", err)})
+		return
+	}
+
+	type GitRef struct {
+		Name string `json:"name"`
+		Type string `json:"type"`
+		Hash string `json:"hash"`
+	}
+	var refs []GitRef
+
+	lines := strings.Split(string(out), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		parts := strings.Fields(line)
+		if len(parts) < 2 {
+			continue
+		}
+		hash := parts[0]
+		refPath := parts[1]
+
+		if strings.HasPrefix(refPath, "refs/heads/") {
+			name := strings.TrimPrefix(refPath, "refs/heads/")
+			refs = append(refs, GitRef{Name: name, Type: "branch", Hash: hash})
+		} else if strings.HasPrefix(refPath, "refs/tags/") {
+			name := strings.TrimPrefix(refPath, "refs/tags/")
+			if strings.HasSuffix(name, "^{}") {
+				continue
+			}
+			refs = append(refs, GitRef{Name: name, Type: "tag", Hash: hash})
+		}
+	}
+
+	c.JSON(http.StatusOK, refs)
+}
+
+func (h *APIHandler) HandleGetProjectCommits(c *gin.Context) {
+	projectID := c.Param("id")
+	proj, ok := h.config.Projects[projectID]
+	if !ok {
+		c.JSON(http.StatusNotFound, gin.H{"error": "project not found"})
+		return
+	}
+
+	usernameVal, _ := c.Get("username")
+	if !h.checkProjectAccess(usernameVal.(string), projectID) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "access denied for this project"})
+		return
+	}
+
+	keyword := c.Query("q")
+	author := c.Query("author")
+	file := c.Query("file")
+	ref := c.Query("ref")
+	
+	// 这里按需触发 cache 更新
+	if err := EnsureRepoCache(c.Request.Context(), proj.Repo, projectID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to update repo cache: %v", err)})
+		return
+	}
+
+	commits, err := GetCommits(c.Request.Context(), projectID, keyword, author, file, ref)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to get commits: %v", err)})
+		return
+	}
+
+	c.JSON(http.StatusOK, commits)
+}
+
+func (h *APIHandler) HandleGetProjectPreviewDiff(c *gin.Context) {
+	projectID := c.Param("id")
+	proj, ok := h.config.Projects[projectID]
+	if !ok {
+		c.JSON(http.StatusNotFound, gin.H{"error": "project not found"})
+		return
+	}
+
+	usernameVal, _ := c.Get("username")
+	if !h.checkProjectAccess(usernameVal.(string), projectID) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "access denied for this project"})
+		return
+	}
+
+	fromCommit := c.Query("from")
+	toCommit := c.Query("to")
+	if toCommit == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "to commit is required"})
+		return
+	}
+
+	if err := EnsureRepoCache(c.Request.Context(), proj.Repo, projectID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to update repo cache: %v", err)})
+		return
+	}
+
+	diffText, err := GetDiff(c.Request.Context(), projectID, fromCommit, toCommit)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to get diff: %v", err)})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"diff": diffText})
+}
+
+type UpdateGitBindingRequest struct {
+	BoundGitAuthors    string `json:"bound_git_authors"`
+	RestrictGitAuthors bool   `json:"restrict_git_authors"`
+}
+
+func (h *APIHandler) HandleGetUserGitBinding(c *gin.Context) {
+	username := c.Param("username")
+	var req UpdateGitBindingRequest
+	err := h.db.QueryRow("SELECT bound_git_authors, restrict_git_authors FROM users WHERE username = ?", username).Scan(&req.BoundGitAuthors, &req.RestrictGitAuthors)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to query user"})
+		}
+		return
+	}
+	c.JSON(http.StatusOK, req)
+}
+
+func (h *APIHandler) HandleUpdateUserGitBinding(c *gin.Context) {
+	username := c.Param("username")
+	var req UpdateGitBindingRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	res, err := h.db.Exec("UPDATE users SET bound_git_authors = ?, restrict_git_authors = ? WHERE username = ?", req.BoundGitAuthors, req.RestrictGitAuthors, username)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update user"})
+		return
+	}
+	rowsAffected, _ := res.RowsAffected()
+	if rowsAffected == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+}
+
+type UserResponse struct {
+	ID                 int       `json:"id"`
+	Username           string    `json:"username"`
+	Role               string    `json:"role"`
+	CreatedAt          time.Time `json:"created_at"`
+	BoundGitAuthors    string    `json:"bound_git_authors"`
+	RestrictGitAuthors bool      `json:"restrict_git_authors"`
+	PermittedProjects  string    `json:"permitted_projects"`
+}
+
+func (h *APIHandler) HandleGetUsers(c *gin.Context) {
+	rows, err := h.db.Query("SELECT id, username, role, created_at, bound_git_authors, restrict_git_authors, permitted_projects FROM users")
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to query users"})
+		return
+	}
+	defer rows.Close()
+
+	var users []UserResponse
+	for rows.Next() {
+		var u UserResponse
+		if err := rows.Scan(&u.ID, &u.Username, &u.Role, &u.CreatedAt, &u.BoundGitAuthors, &u.RestrictGitAuthors, &u.PermittedProjects); err == nil {
+			users = append(users, u)
+		}
+	}
+	c.JSON(http.StatusOK, users)
+}
+
+type CreateUserRequest struct {
+	Username           string `json:"username" binding:"required"`
+	Password           string `json:"password" binding:"required"`
+	Role               string `json:"role" binding:"required"`
+	BoundGitAuthors    string `json:"bound_git_authors"`
+	RestrictGitAuthors bool   `json:"restrict_git_authors"`
+	PermittedProjects  string `json:"permitted_projects"`
+}
+
+func (h *APIHandler) HandleCreateUser(c *gin.Context) {
+	var req CreateUserRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	hash, err := HashPassword(req.Password)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to hash password"})
+		return
+	}
+
+	if req.PermittedProjects == "" {
+		req.PermittedProjects = "*"
+	}
+
+	_, err = h.db.Exec("INSERT INTO users (username, password_hash, role, created_at, bound_git_authors, restrict_git_authors, permitted_projects) VALUES (?, ?, ?, ?, ?, ?, ?)",
+		req.Username, hash, req.Role, time.Now(), req.BoundGitAuthors, req.RestrictGitAuthors, req.PermittedProjects)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create user, username might exist"})
+		return
+	}
+
+	c.JSON(http.StatusCreated, gin.H{"message": "user created"})
+}
+
+type UpdateUserRequest struct {
+	Password           string `json:"password"`
+	Role               string `json:"role" binding:"required"`
+	BoundGitAuthors    string `json:"bound_git_authors"`
+	RestrictGitAuthors bool   `json:"restrict_git_authors"`
+	PermittedProjects  string `json:"permitted_projects"`
+}
+
+func (h *APIHandler) HandleUpdateUser(c *gin.Context) {
+	username := c.Param("username")
+	var req UpdateUserRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if req.Password != "" {
+		hash, _ := HashPassword(req.Password)
+		_, err := h.db.Exec("UPDATE users SET password_hash = ?, role = ?, bound_git_authors = ?, restrict_git_authors = ?, permitted_projects = ? WHERE username = ?",
+			hash, req.Role, req.BoundGitAuthors, req.RestrictGitAuthors, req.PermittedProjects, username)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update user"})
+			return
+		}
+	} else {
+		_, err := h.db.Exec("UPDATE users SET role = ?, bound_git_authors = ?, restrict_git_authors = ?, permitted_projects = ? WHERE username = ?",
+			req.Role, req.BoundGitAuthors, req.RestrictGitAuthors, req.PermittedProjects, username)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update user"})
+			return
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "user updated"})
+}
+
+func (h *APIHandler) HandleDeleteUser(c *gin.Context) {
+	username := c.Param("username")
+	if username == "admin" {
+		c.JSON(http.StatusForbidden, gin.H{"error": "cannot delete default admin"})
+		return
+	}
+	_, err := h.db.Exec("DELETE FROM users WHERE username = ?", username)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete user"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "user deleted"})
 }
 
 type CreateTaskRequest struct {
@@ -147,6 +519,26 @@ func (h *APIHandler) HandleCreateTask(c *gin.Context) {
 		return
 	}
 
+	// 检查环境是否存在
+	envExists := false
+	for _, env := range proj.Environments {
+		if env.ID == req.EnvID {
+			envExists = true
+			break
+		}
+	}
+	if !envExists {
+		c.JSON(http.StatusNotFound, gin.H{"error": "environment not found"})
+		return
+	}
+
+	usernameVal, _ := c.Get("username")
+	username := usernameVal.(string)
+	if !h.checkProjectAccess(username, req.ProjectID) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "access denied for this project"})
+		return
+	}
+
 	// @Ref: docs/sps/plans/20260527_nanoplan_tdd_enhanced.md | @Date: 2026-05-27
 	// 环境部署互斥锁
 	var activeCount int
@@ -160,13 +552,36 @@ func (h *APIHandler) HandleCreateTask(c *gin.Context) {
 		return
 	}
 
-	// 从中间件中解析出审计用户名
-	usernameVal, _ := c.Get("username")
-	username := usernameVal.(string)
-
-	// 获取用户 ID
+	// 获取用户信息
 	var userID int64
-	_ = h.db.QueryRow("SELECT id FROM users WHERE username = ?", username).Scan(&userID)
+	var boundAuthors string
+	var restrict bool
+	_ = h.db.QueryRow("SELECT id, COALESCE(bound_git_authors, ''), COALESCE(restrict_git_authors, 0) FROM users WHERE username = ?", username).Scan(&userID, &boundAuthors, &restrict)
+
+	if restrict {
+		if err := EnsureRepoCache(c.Request.Context(), proj.Repo, req.ProjectID); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update repo cache for auth check"})
+			return
+		}
+		
+		author, err := GetCommitAuthor(c.Request.Context(), req.ProjectID, req.CommitID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to resolve commit author"})
+			return
+		}
+		
+		allowed := false
+		for _, a := range strings.Split(boundAuthors, ",") {
+			if strings.TrimSpace(a) == author {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			c.JSON(http.StatusForbidden, gin.H{"error": fmt.Sprintf("Access Denied: you are not allowed to deploy commits authored by '%s'", author)})
+			return
+		}
+	}
 
 	releaseName := time.Now().Format("20060102150405")
 
@@ -270,10 +685,15 @@ func (h *APIHandler) HandleGetTasks(c *gin.Context) {
 // HandleGetTaskDetail 获取任务详情
 func (h *APIHandler) HandleGetTaskDetail(c *gin.Context) {
 	id := c.Param("id")
-	var status string
-	err := h.db.QueryRow("SELECT status FROM deploy_tasks WHERE id = ?", id).Scan(&status)
+	var status, projectID string
+	err := h.db.QueryRow("SELECT status, project_id FROM deploy_tasks WHERE id = ?", id).Scan(&status, &projectID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "task not found"})
+		return
+	}
+	usernameVal, _ := c.Get("username")
+	if !h.checkProjectAccess(usernameVal.(string), projectID) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "access denied for this project"})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"id": id, "status": status})
@@ -283,6 +703,17 @@ func (h *APIHandler) HandleGetTaskDetail(c *gin.Context) {
 // @Ref: docs/sps/plans/20260527_nanoplan_tdd_enhanced.md | @Date: 2026-05-27
 func (h *APIHandler) HandleGetTaskLog(c *gin.Context) {
 	id := c.Param("id")
+
+	var projectID string
+	err := h.db.QueryRow("SELECT project_id FROM deploy_tasks WHERE id = ?", id).Scan(&projectID)
+	if err == nil {
+		usernameVal, _ := c.Get("username")
+		if !h.checkProjectAccess(usernameVal.(string), projectID) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "access denied for this project"})
+			return
+		}
+	}
+
 	logFilePath := filepath.Join(h.config.Global.LogPath, fmt.Sprintf("task_%s.log", id))
 
 	file, err := os.Open(logFilePath)
@@ -356,7 +787,7 @@ func (h *APIHandler) HandleWSLog(c *gin.Context) {
 		return
 	}
 	
-	_, _, err = ParseToken(authMsg.Token, h.config.Global.JWTSecret)
+	username, _, err := ParseToken(authMsg.Token, h.config.Global.JWTSecret)
 	if err != nil {
 		conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.ClosePolicyViolation, "invalid token"))
 		return
@@ -366,6 +797,13 @@ func (h *APIHandler) HandleWSLog(c *gin.Context) {
 	conn.SetReadDeadline(time.Time{})
 
 	id := c.Param("id")
+	
+	var projectID string
+	err = h.db.QueryRow("SELECT project_id FROM deploy_tasks WHERE id = ?", id).Scan(&projectID)
+	if err == nil && !h.checkProjectAccess(username, projectID) {
+		conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.ClosePolicyViolation, "access denied for this project"))
+		return
+	}
 	logFilePath := filepath.Join(h.config.Global.LogPath, fmt.Sprintf("task_%s.log", id))
 
 	// 简单的轮询推送日志 delta (类似 tail -f)
@@ -438,6 +876,12 @@ func (h *APIHandler) HandleTriggerRollback(c *gin.Context) {
 		return
 	}
 
+	usernameVal, _ := c.Get("username")
+	if !h.checkProjectAccess(usernameVal.(string), projectID) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "access denied for this project"})
+		return
+	}
+
 	var targetEnv *EnvironmentConfig
 	for _, env := range proj.Environments {
 		if env.ID == envID {
@@ -484,6 +928,12 @@ func (h *APIHandler) HandleGetTaskDiff(c *gin.Context) {
 		return
 	}
 
+	usernameVal, _ := c.Get("username")
+	if !h.checkProjectAccess(usernameVal.(string), projectID) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "access denied for this project"})
+		return
+	}
+
 	if status == "deploying" || status == "pending" {
 		c.JSON(http.StatusConflict, gin.H{"error": "task is still deploying, diff not ready"})
 		return
@@ -507,26 +957,77 @@ func (h *APIHandler) HandleGetTaskDiff(c *gin.Context) {
 		return
 	}
 
-	// 3. 在本地克隆工作区（WorkspacePath/project_id/release_name）执行 git diff
+	// 3. 确定执行 git diff 的工作目录
+	// 优先使用当次部署的克隆目录，若已被清理则降级到 workspace 中的持久仓库
 	buildPath := filepath.Join(h.config.Global.WorkspacePath, projectID, releaseName)
 
-	// 带超时上限执行命令，对冲 150ms 性能限额，防止命令卡死
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	gitRepoPath := buildPath
+	if _, statErr := os.Stat(filepath.Join(buildPath, ".git")); os.IsNotExist(statErr) {
+		// buildPath 不存在（demo 数据 / 旧发布已清理），降级：在 workspace 内递归查找该项目的 git 仓库
+		found, walkErr := findGitRepo(h.config.Global.WorkspacePath, currentCommit)
+		if walkErr != nil || found == "" {
+			c.JSON(http.StatusOK, gin.H{"diff": fmt.Sprintf(
+				"本地构建目录已被清理，且在 workspace 中未找到含目标 commit (%s) 的 git 仓库。\n请重新部署后查看 diff。",
+				currentCommit[:8],
+			)})
+			return
+		}
+		gitRepoPath = found
+	}
+
+	// git diff 执行，超时 15s（本地操作，不需要网络）
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "git", "diff", prevCommit, currentCommit)
-	cmd.Dir = buildPath
-	
+	cmd.Dir = gitRepoPath
+
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		// 优雅退化容错：如果目录已被清理或尚无本地仓库
-		c.JSON(http.StatusOK, gin.H{"diff": fmt.Sprintf("git diff 执行失败 (可能本地构建目录已被清理): %s\n输出: %s", err.Error(), string(output))})
+		c.JSON(http.StatusOK, gin.H{"diff": fmt.Sprintf(
+			"git diff 执行失败（目录: %s）: %s\n输出: %s",
+			gitRepoPath, err.Error(), string(output),
+		)})
+		return
+	}
+
+	if len(strings.TrimSpace(string(output))) == 0 {
+		c.JSON(http.StatusOK, gin.H{"diff": fmt.Sprintf(
+			"两次提交内容完全相同（%s → %s），无代码变更。",
+			prevCommit[:8], currentCommit[:8],
+		)})
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"diff": string(output),
 	})
+}
+
+// findGitRepo 在 root 目录树中递归查找包含指定 commit 的 git 仓库，返回第一个匹配路径。
+func findGitRepo(root, commit string) (string, error) {
+	var result string
+	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil // 忽略权限错误，继续
+		}
+		// 找到 .git 目录，说明 path 的父目录是 git 仓库
+		if info.IsDir() && info.Name() == ".git" {
+			repoDir := filepath.Dir(path)
+			// 检查该仓库是否包含目标 commit
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			checkCmd := exec.CommandContext(ctx, "git", "cat-file", "-t", commit)
+			checkCmd.Dir = repoDir
+			out, checkErr := checkCmd.Output()
+			if checkErr == nil && strings.TrimSpace(string(out)) == "commit" {
+				result = repoDir
+				return filepath.SkipAll // 找到即停止
+			}
+		}
+		return nil
+	})
+	return result, err
 }
 
 // ComputeGithubSignature 计算 Github Webhook 签名

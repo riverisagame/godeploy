@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -185,4 +186,40 @@ func TestDB_Migration_Role(t *testing.T) {
 	if bobRole != "viewer" {
 		t.Errorf("expected bob role to be 'viewer', got %q", bobRole)
 	}
+}
+
+// TestDB_ConcurrentTaskUpdates 验证 SQLite 数据库在并发更新时的锁竞争处理
+func TestDB_ConcurrentTaskUpdates(t *testing.T) {
+	dsn := fmt.Sprintf("file:mem_concurrent_%d?mode=memory&cache=shared", time.Now().UnixNano())
+	db, err := godeployer.InitDB(dsn)
+	if err != nil {
+		t.Fatalf("InitDB failed: %v", err)
+	}
+	defer db.Close()
+
+	// Insert a task
+	insertSQL := `INSERT INTO deploy_tasks (id, project_id, env_id, commit_id, status, release_name, user_id, username, config_snapshot, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	_, err = db.Exec(insertSQL, 1, "test", "test", "commit", "pending", "rel", 1, "admin", "{}", time.Now())
+	if err != nil {
+		t.Fatalf("Insert task failed: %v", err)
+	}
+
+	// 模拟 10 个 goroutine 并发更新该任务
+	var wg sync.WaitGroup
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			status := fmt.Sprintf("status_%d", idx)
+			_, err := db.Exec("UPDATE deploy_tasks SET status = ? WHERE id = ?", status, 1)
+			if err != nil {
+				// We expect some might fail if totally locked, but because SQLite has a busy timeout, they shouldn't fail with "database is locked"
+				if err.Error() == "database is locked" {
+					t.Errorf("Concurrent update failed with database is locked: %v", err)
+				}
+			}
+		}(i)
+	}
+
+	wg.Wait()
 }

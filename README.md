@@ -71,37 +71,9 @@ npm run build
 ```
 *(注：前端的构建产物最终放置在后端的静态代理服务目录下，跟随主服务运行)*
 
-## 如何配置
+## 3. 配置指南
 
-服务启动前，您需要配置好 `config.yaml` 文件（可参考 `config.example.yaml`）。
-以下是关键配置项说明：
-
-```yaml
-server:
-  port: 8080                    # 后端 API 端口
-  auth_secret: "your_jwt_secret" # 用于生成和签发 JWT Token 的密钥
-
-database:
-  driver: "sqlite"              # 当前版本固定为 sqlite
-  dsn: "deploy.db"              # SQLite 物理文件路径
-
-projects:                       # 配置你的目标项目
-  - id: "my-app"
-    name: "My App"
-    repo_url: "git@github.com:user/my-app.git"
-    environments:
-      - id: "production"
-        name: "Production"
-        nodes:
-          - host: "10.0.0.1"    # 目标服务器 1
-            port: 22
-            user: "deploy"
-            deploy_path: "/var/www/my-app"
-          - host: "10.0.0.2"    # 目标服务器 2
-            port: 22
-            user: "deploy"
-            deploy_path: "/var/www/my-app"
-```
+> 📚 **关于配置的终极指南**：请阅读 [docs/CONFIGURATION.md](docs/CONFIGURATION.md)，里面包含了从入门到精通的所有配置项、钩子函数说明以及实战范例（完全适合初学者阅读）。
 
 编写好配置后，启动主服务：
 ```bash

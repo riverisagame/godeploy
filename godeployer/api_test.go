@@ -443,3 +443,55 @@ func TestAPI_GithubWebhook(t *testing.T) {
 		t.Errorf("expected 409 Conflict for concurrent webhook, got %d (body: %s)", w2.Code, w2.Body.String())
 	}
 }
+
+// TestHandleTasks_InvalidProject 验证创建部署任务时，无效的项目 ID 是否被正确拦截。
+func TestHandleTasks_InvalidProject(t *testing.T) {
+	r, _, cleanup := SetupTestRouter(t)
+	defer cleanup()
+
+	token, _ := godeployer.GenerateToken("admin", "admin", "test-secret-key-12345", 5*time.Second)
+
+	taskPayload := map[string]string{
+		"project_id": "non-existent-project",
+		"env_id":     "testing",
+		"commit_id":  "abcde12345",
+	}
+	body, _ := json.Marshal(taskPayload)
+	req, _ := http.NewRequest("POST", "/api/tasks", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	// 应该是 400 Bad Request 或者 404 Not Found
+	if w.Code != http.StatusNotFound && w.Code != http.StatusBadRequest {
+		t.Errorf("expected 404 or 400 for invalid project, got %d (body: %s)", w.Code, w.Body.String())
+	}
+}
+
+// TestHandleDeploy_InvalidEnv 验证创建部署任务时，无效的环境 ID 是否被正确拦截。
+func TestHandleDeploy_InvalidEnv(t *testing.T) {
+	r, _, cleanup := SetupTestRouter(t)
+	defer cleanup()
+
+	token, _ := godeployer.GenerateToken("admin", "admin", "test-secret-key-12345", 5*time.Second)
+
+	taskPayload := map[string]string{
+		"project_id": "test-app",
+		"env_id":     "invalid-env",
+		"commit_id":  "abcde12345",
+	}
+	body, _ := json.Marshal(taskPayload)
+	req, _ := http.NewRequest("POST", "/api/tasks", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	// 应该是 400 Bad Request 或者 404 Not Found
+	if w.Code != http.StatusNotFound && w.Code != http.StatusBadRequest {
+		t.Errorf("expected 404 or 400 for invalid env, got %d (body: %s)", w.Code, w.Body.String())
+	}
+}

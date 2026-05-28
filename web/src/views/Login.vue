@@ -74,9 +74,13 @@ const handleLogin = async () => {
         password: loginForm.password
       })
 
-      const { token, username } = response.data
+      const { token, username: returnedUsername, role } = response.data
+      
       localStorage.setItem('token', token)
-      localStorage.setItem('username', username)
+      localStorage.setItem('username', returnedUsername)
+      if (role) {
+        localStorage.setItem('role', role)
+      }
       
       ElMessage.success('登录成功，欢迎回来！')
       router.push('/')

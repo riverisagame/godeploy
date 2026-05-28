@@ -36,9 +36,17 @@ func InitDB(dsn string) (*sql.DB, error) {
 		return nil, fmt.Errorf("failed to create users table: %w", err)
 	}
 
-	// 尝试向可能存在的旧版 users 表中追加 role 列（若已存在，则忽略错误）
+	// 尝试向可能存在的旧版 users 表中追加列（若已存在，则忽略错误）
 	// @Ref: docs/sps/plans/20260527_nanoplan_m2_rbac_webhooks.md
 	_, _ = db.Exec("ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'viewer'")
+	
+	// @Ref: docs/sps/plans/20260527_nanoplan_git_binding.md
+	_, _ = db.Exec("ALTER TABLE users ADD COLUMN bound_git_authors TEXT DEFAULT ''")
+	_, _ = db.Exec("ALTER TABLE users ADD COLUMN restrict_git_authors BOOLEAN DEFAULT 0")
+
+	// @Ref: docs/sps/plans/20260528_project_permissions_plan.md
+	_, _ = db.Exec("ALTER TABLE users ADD COLUMN permitted_projects TEXT DEFAULT '*'")
+
 
 	// 无损数据修复：确保现存的 admin 用户具备管理员权限
 	_, err = db.Exec("UPDATE users SET role = 'admin' WHERE username = 'admin'")

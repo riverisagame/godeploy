@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -82,6 +83,10 @@ func setupMockSSHServer(t testing.TB) (string, string, func()) {
 					go func(in <-chan *ssh.Request) {
 						for req := range in {
 							if req.Type == "exec" {
+								cmdStr := string(req.Payload)
+								if strings.Contains(cmdStr, "sleep") {
+									time.Sleep(50 * time.Millisecond)
+								}
 								req.Reply(true, nil)
 								channel.Write([]byte("mock_output\n"))
 								channel.SendRequest("exit-status", false, ssh.Marshal(struct{ uint32 }{0}))
@@ -218,3 +223,37 @@ func BenchmarkSSHPool_Concurrent(b *testing.B) {
 	})
 }
 
+// TestSSHExecutor_Timeout 验证 SSH 执行器的超时保护
+func TestSSHExecutor_Timeout(t *testing.T) {
+	addr, keyPath, cleanup := setupMockSSHServer(t)
+	defer cleanup()
+
+	host, portStr, _ := net.SplitHostPort(addr)
+	var port int
+	fmt.Sscanf(portStr, "%d", &port)
+
+	serverCfg := ServerConfig{
+		Host:       host,
+		Port:       port,
+		User:       "testuser",
+		SSHKeyPath: keyPath,
+	}
+
+	pool := NewSSHPool(serverCfg, 1)
+	defer pool.Close()
+
+	executor := NewSSHExecutor(serverCfg, pool)
+	
+	// Create a context with a very short timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
+	defer cancel()
+	
+	executor.Ctx = ctx
+
+	_, err := executor.RunCommand("sleep 5")
+	if err == nil {
+		t.Errorf("Expected timeout error, got nil")
+	} else if err.Error() != "context deadline exceeded" && !strings.Contains(err.Error(), "timeout") && !strings.Contains(err.Error(), "context") {
+		t.Errorf("Expected context deadline exceeded or timeout error, got: %v", err)
+	}
+}
