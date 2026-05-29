@@ -40,3 +40,6 @@
 | 2026-05-28 | M10: Git Binding | api.go, git.go, Dashboard.vue | docs/sps/plans/20260527_git_author_restriction.md | COMPLETED |
 | 2026-05-28 | M11: Project Access | db.go, api.go, Dashboard.vue | docs/sps/plans/20260528_project_permissions_plan.md | COMPLETED |
 | 2026-05-28 | ARCH-008 | USER_MANAGEMENT | docs/sps/decisions/20260528_user_management_scan.md | COMPLETED |
+| 2026-05-29 | DEMO-001 | PHP_DEMO_ENV    | scripts/demo.sh, demo_projects.d/, README_DEMO.md | COMPLETED |
+| 2026-05-29 | FIX-001  | DIFF_FALLBACK   | godeployer/api.go (findGitRepo) | COMPLETED |
+| 2026-05-29 | UI-001   | DARK_DIFF_THEME | web/src/views/Dashboard.vue (.dark-diff) | COMPLETED |
