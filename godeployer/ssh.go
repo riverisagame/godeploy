@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"strings"
 
 	"golang.org/x/crypto/ssh"
 )
@@ -16,8 +17,9 @@ type RemoteExecutor interface {
 }
 
 type SSHExecutor struct {
-	Server ServerConfig
-	Ctx    context.Context // 增加可选的 Context 字段以实现超时控制对冲
+	Server      ServerConfig
+	Ctx         context.Context // 增加可选的 Context 字段以实现超时控制对冲
+	ExcludeList []string        // 动态过滤排除列表
 
 	pool *SSHPool
 }
@@ -99,6 +101,13 @@ func (s *SSHExecutor) Rsync(local, remote string, linkDest string) error {
 
 	if linkDest != "" {
 		args = append(args, fmt.Sprintf("--link-dest=%s", linkDest))
+	}
+
+	for _, pattern := range s.ExcludeList {
+		trimmed := strings.TrimSpace(pattern)
+		if trimmed != "" {
+			args = append(args, fmt.Sprintf("--exclude=%s", trimmed))
+		}
 	}
 
 	// 拼接本地目录与目标服务器远程目录。例如: /local/path/ deploy@host:/var/www/my-app/releases/xxx/

@@ -13,6 +13,10 @@
         <el-button v-if="userRole === 'admin'" type="primary" size="default" variant="text" @click="$router.push('/users')">
           用户管理
         </el-button>
+        <!-- @Ref: docs/sps/plans/20260529_diff_ux_loading_plan.md | @Date: 2026-05-29 -->
+        <el-button v-if="userRole === 'admin'" type="warning" size="default" variant="text" :loading="pruneLoading" @click="handleSystemPrune">
+          系统自愈清理
+        </el-button>
         <el-button type="primary" size="default" variant="text" @click="openSettings">
           账号配置
         </el-button>
@@ -34,7 +38,10 @@
             :class="{ active: selectedProject?.id === proj.id }"
             @click="selectProject(proj)"
           >
-            <div class="proj-name">{{ proj.name }}</div>
+            <div class="proj-name-row">
+              <span class="proj-name">{{ proj.name }}</span>
+              <el-badge :value="proj.environments?.length || 0" type="info" class="env-badge" />
+            </div>
             <div class="proj-id">{{ proj.id }}</div>
           </div>
           <el-empty v-if="projects.length === 0" description="未加载到项目配置" :image-size="60" />
@@ -168,6 +175,34 @@
                       </el-form-item>
                     </div>
 
+                    <!-- 上线备注与文件过滤 -->
+                    <el-form-item label="发布备注/说明" style="margin-top: 15px;">
+                      <el-input 
+                        v-model="deployForm.description" 
+                        placeholder="请输入本次上线的备注说明（如：修复xx Bug）" 
+                        type="textarea" 
+                        :rows="2" 
+                      />
+                    </el-form-item>
+
+                    <div v-if="rawFilesList.length > 0" class="file-filter-wrapper" style="margin-top: 15px; margin-bottom: 20px;">
+                      <div class="filter-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                        <span style="font-size: 13px; font-weight: 600; color: #8a99ad;">上线文件过滤 (取消勾选排除同步)</span>
+                        <el-tag size="small" type="info">共 {{ rawFilesList.length }} 个文件</el-tag>
+                      </div>
+                      <div style="border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 6px; padding: 10px; background-color: #0b0e14; max-height: 240px; overflow-y: auto;">
+                        <el-tree
+                          ref="fileTreeRef"
+                          :data="fileTreeData"
+                          show-checkbox
+                          node-key="path"
+                          default-expand-all
+                          :default-checked-keys="defaultCheckedKeys"
+                          :props="{ label: 'label', children: 'children' }"
+                        />
+                      </div>
+                    </div>
+
                     <div style="display: flex; gap: 10px; margin-top: 20px;">
                       <el-button 
                         type="primary" 
@@ -189,14 +224,24 @@
               <!-- 3. 部署历史记录表格 -->
               <div class="section-card history-section">
                 <div class="card-header">部署与审计历史</div>
-                <el-table :data="historyTasks" style="width: 100%" size="default">
-                  <el-table-column prop="id" label="ID" width="70" />
-                  <el-table-column prop="release_name" label="Release 版本" width="160" />
-                  <el-table-column prop="commit_id" label="Commit" width="120" />
-                  <el-table-column prop="username" label="操作人" width="110" />
-                  <el-table-column prop="status" label="状态" width="130">
+                <el-table 
+                  :data="historyTasks" 
+                  style="width: 100%" 
+                  size="default"
+                  :row-class-name="(row) => row.row.status === 'failed' ? 'row-failed' : ''"
+                >
+                  <el-table-column prop="id" label="ID" width="60" />
+                  <el-table-column prop="release_name" label="Release 版本" width="155" />
+                  <el-table-column label="Commit" width="105">
                     <template #default="scope">
-                      <el-tag :type="getStatusTagType(scope.row.status)">
+                      <code class="commit-hash">{{ scope.row.commit_id?.substring(0, 8) }}</code>
+                    </template>
+                  </el-table-column>
+                  <el-table-column prop="username" label="操作人" width="100" />
+                  <el-table-column prop="description" label="发布备注" show-overflow-tooltip />
+                  <el-table-column prop="status" label="状态" width="120">
+                    <template #default="scope">
+                      <el-tag :type="getStatusTagType(scope.row.status)" effect="dark">
                         {{ getStatusText(scope.row.status) }}
                       </el-tag>
                     </template>
@@ -222,6 +267,8 @@
                           size="small" 
                           type="primary" 
                           plain
+                          :loading="loadingDiff && diffTaskInfo.startsWith(scope.row.commit_id?.substring(0,8))"
+                          :disabled="loadingDiff"
                           @click="showDiff(scope.row)"
                         >
                           对比
@@ -271,15 +318,61 @@
     </el-dialog>
 
     <!-- Git Diff 差异对比弹窗 -->
-    <el-dialog v-model="diffVisible" title="Git 代码差异对比" fullscreen>
+    <el-dialog
+      v-model="diffVisible"
+      :title="diffTaskInfo ? `代码对比 · ${diffTaskInfo}` : 'Git 代码差异对比'"
+      fullscreen
+      destroy-on-close
+    >
       <div style="margin-bottom: 15px; display: flex; justify-content: flex-end;">
-        <el-radio-group v-model="diffFormat" size="small">
-          <el-radio-button label="line-by-line">竖向对比</el-radio-button>
-          <el-radio-button label="side-by-side">横向对比</el-radio-button>
+        <el-radio-group v-model="diffFormat" size="small" :disabled="loadingDiff">
+          <el-radio-button value="line-by-line">竖向对比</el-radio-button>
+          <el-radio-button value="side-by-side">横向对比</el-radio-button>
         </el-radio-group>
       </div>
-      <div class="diff-container dark-diff" style="height: calc(100vh - 120px); overflow-y: auto; background: #0d1117; padding: 16px; border-radius: 6px;" v-html="highlightedDiff">
+
+      <!-- 加载中：骨架屏 -->
+      <div v-if="loadingDiff" class="diff-loading-skeleton">
+        <div class="skeleton-bar wide"></div>
+        <div class="skeleton-bar medium"></div>
+        <div class="skeleton-bar narrow" style="background: rgba(63,185,80,0.15);"></div>
+        <div class="skeleton-bar wide"></div>
+        <div class="skeleton-bar medium" style="background: rgba(248,81,73,0.15);"></div>
+        <div class="skeleton-bar narrow"></div>
+        <div class="skeleton-bar wide"></div>
+        <div class="skeleton-bar medium" style="background: rgba(63,185,80,0.15);"></div>
+        <div class="skeleton-bar narrow"></div>
+        <div class="skeleton-bar wide"></div>
+        <div style="text-align:center; margin-top: 32px; color: #484f58; font-size: 14px;">
+          <el-icon class="is-loading" style="margin-right: 6px;"><Loading /></el-icon>
+          正在获取代码差异...
+        </div>
       </div>
+
+      <!-- 加载完成：双视角 Tab 切换 -->
+      <el-tabs v-else v-model="activeDiffTab" class="diff-tabs" type="card">
+        <el-tab-pane label="变更文件列表" name="files">
+          <div class="files-view-container" style="background: #0d1117; padding: 16px; border-radius: 6px; height: calc(100vh - 180px); overflow-y: auto;">
+            <el-table :data="parsedDiffFiles" style="width: 100%" size="small" border>
+              <el-table-column label="状态" width="100">
+                <template #default="scope">
+                  <el-tag :type="getFileStatusTagType(scope.row.status)" effect="dark">
+                    {{ scope.row.statusText }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column prop="path" label="文件相对路径" />
+            </el-table>
+          </div>
+        </el-tab-pane>
+        <el-tab-pane label="代码差异比对 (Diff)" name="diff">
+          <div class="diff-container dark-diff"
+            style="height: calc(100vh - 180px); overflow-y: auto; background: #0d1117; padding: 16px; border-radius: 6px;"
+            v-html="highlightedDiff"
+          >
+          </div>
+        </el-tab-pane>
+      </el-tabs>
     </el-dialog>
 
     <!-- 账号配置弹窗 -->
@@ -311,7 +404,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, reactive, nextTick, computed } from 'vue'
+import { ref, onMounted, reactive, nextTick, computed, watch } from 'vue'
 import { html } from 'diff2html'
 import 'diff2html/bundles/css/diff2html.min.css'
 import { useRouter } from 'vue-router'
@@ -363,7 +456,64 @@ const historyTasks = ref<Task[]>([])
 const deployForm = reactive({
   targetType: 'branch',
   branch: '',
-  commit: ''
+  commit: '',
+  description: ''
+})
+
+const rawFilesList = ref<string[]>([])
+const fileTreeData = ref<any[]>([])
+const defaultCheckedKeys = ref<string[]>([])
+const fileTreeRef = ref<any>(null)
+const activeDiffTab = ref('files')
+const parsedDiffFiles = ref<any[]>([])
+
+// 扁平路径构建 el-tree 树形嵌套数据
+const buildTree = (paths: string[]) => {
+  const root: any[] = []
+  paths.forEach(p => {
+    const parts = p.split('/')
+    let current = root
+    let curPath = ''
+    parts.forEach((part, index) => {
+      curPath = curPath ? `${curPath}/${part}` : part
+      let node = current.find(item => item.label === part)
+      if (!node) {
+        node = {
+          label: part,
+          path: curPath,
+          children: []
+        }
+        current.push(node)
+      }
+      if (index === parts.length - 1) {
+        delete node.children
+      } else {
+        current = node.children
+      }
+    })
+  })
+  return root
+}
+
+// 监听选定的版本分支，自动调用 preview_diff 接口获取变更文件树
+watch(() => deployForm.branch, async (newVal) => {
+  if (!selectedProject.value || !newVal) {
+    rawFilesList.value = []
+    fileTreeData.value = []
+    defaultCheckedKeys.value = []
+    return
+  }
+  try {
+    const res = await axios.get(`/api/projects/${selectedProject.value.id}/preview_diff`, {
+      params: { to: newVal, env_id: activeEnvTab.value }
+    })
+    const files = res.data.files || []
+    rawFilesList.value = files
+    fileTreeData.value = buildTree(files)
+    defaultCheckedKeys.value = [...files]
+  } catch (err) {
+    console.error('Failed to preview diff files', err)
+  }
 })
 
 const commitFilters = reactive({
@@ -428,6 +578,9 @@ let wsConnection: WebSocket | null = null
 const diffVisible = ref(false)
 const diffText = ref('')
 const diffFormat = ref('side-by-side')
+const loadingDiff = ref(false)
+const diffTaskInfo = ref('')
+const pruneLoading = ref(false)
 
 const highlightedDiff = computed(() => {
   if (!diffText.value) return ''
@@ -564,14 +717,27 @@ const triggerDeploy = async (env: Environment) => {
     type: 'warning'
   }).then(async () => {
     try {
+      // 获取未勾选的叶子节点相对路径，用作 extra_exclude
+      let extraExclude = ''
+      if (fileTreeRef.value && rawFilesList.value.length > 0) {
+        const checkedKeys = fileTreeRef.value.getCheckedKeys(true) || []
+        const excludes = rawFilesList.value.filter(file => !checkedKeys.includes(file))
+        extraExclude = excludes.join(',')
+      }
+
       const res = await axios.post('/api/tasks', {
         project_id: selectedProject.value?.id,
         env_id: env.id,
-        commit_id: deployForm.commit || deployForm.branch
+        commit_id: deployForm.commit || deployForm.branch,
+        description: deployForm.description,
+        extra_exclude: extraExclude
       })
 
       const task = res.data
       showLog(task)
+
+      // 部署发起成功后，清空本次备注
+      deployForm.description = ''
       
       // 刷新历史
       fetchHistory(selectedProject.value!.id, env.id)
@@ -729,28 +895,105 @@ const triggerRollback = (task: Task) => {
 }
 
 // 展示 Git 差异对比
+// 策略：点击立刻弹框（防止用户误以为没反应乱点），内部骨架屏过渡，数据到后渲染
 const showDiff = async (task: Task) => {
+  if (loadingDiff.value) return  // 防重复点击
+  diffText.value = ''
+  parsedDiffFiles.value = []
+  activeDiffTab.value = 'files' // 默认切到文件列表 tab
+  diffTaskInfo.value = (task.commit_id?.substring(0, 8) || '') + ' · ' + (task.release_name || '')
+  loadingDiff.value = true
+  diffVisible.value = true   // 立刻弹框，骨架屏先显示
   try {
     const res = await axios.get(`/api/tasks/${task.id}/diff`)
-    diffText.value = res.data.diff || '未发现文件修改差异'
+    
+    // 获取返回的 diff，新版会返回 {"diff": "...", "files": "..."}
+    // 兼容旧版的纯文本格式
+    let rawDiff = ''
+    let rawFiles = ''
+    if (res.data && typeof res.data === 'object' && res.data.diff !== undefined) {
+      rawDiff = res.data.diff
+      rawFiles = res.data.files || ''
+    } else {
+      rawDiff = res.data || ''
+    }
+
+    diffText.value = rawDiff || '两次提交内容相同，无代码变更'
+
+    // 解析变更文件列表
+    if (rawFiles) {
+      const lines = rawFiles.split('\n')
+      const files: any[] = []
+      lines.forEach(line => {
+        line = line.trim()
+        if (!line) return
+        const parts = line.split(/\s+/)
+        if (parts.length >= 2) {
+          const status = parts[0]
+          const path = parts.slice(1).join(' ')
+          let statusText = '修改'
+          if (status === 'A') statusText = '新增'
+          if (status === 'D') statusText = '删除'
+          files.push({ status, statusText, path })
+        } else {
+          files.push({ status: 'M', statusText: '变更', path: line })
+        }
+      })
+      parsedDiffFiles.value = files
+    } else {
+      parsedDiffFiles.value = [{ status: '?', statusText: '无数据', path: '暂无变更文件解析数据' }]
+    }
   } catch (err) {
-    diffText.value = `diff --git a/src/App.vue b/src/App.vue
-index a9d6e43..b7d6c29 100644
---- a/src/App.vue
-+++ b/src/App.vue
-@@ -10,3 +10,4 @@
--    background-color: #000;
-+    background-color: #121212;
-+    color: #e0e0e0;
-`
+    diffText.value = '获取 diff 失败，请稍后重试'
+  } finally {
+    loadingDiff.value = false
   }
-  diffVisible.value = true
+}
+
+const getFileStatusTagType = (status: string) => {
+  if (status === 'A') return 'success'
+  if (status === 'D') return 'danger'
+  return 'warning'
 }
 
 const handleLogout = () => {
   localStorage.removeItem('token')
   localStorage.removeItem('username')
   router.push('/login')
+}
+
+// @Ref: docs/sps/plans/20260529_diff_ux_loading_plan.md | @Date: 2026-05-29
+const handleSystemPrune = () => {
+  ElMessageBox.confirm(
+    '确认执行系统自愈与磁盘清理吗？这会清除数据库过期记录、物理删除无关联日志和差异快照文件以盘活磁盘。',
+    '系统清理提示',
+    {
+      confirmButtonText: '确认执行',
+      cancelButtonText: '取消',
+      type: 'warning'
+    }
+  ).then(async () => {
+    pruneLoading.value = true
+    try {
+      const res = await axios.post('/api/system/prune')
+      const data = res.data
+      ElNotification({
+        title: '系统自愈完成',
+        message: `数据库已强制老化清理任务 ${data.pruned_tasks_count} 个，物理移除孤儿垃圾文件 ${data.pruned_orphans_count} 个，共盘活磁盘空间 ${Math.round(data.freed_bytes / 1024)} KB。`,
+        type: 'success',
+        duration: 8000
+      })
+      // 刷新数据
+      if (selectedProject.value && envID.value) {
+        fetchHistoryTasks(selectedProject.value.id, envID.value)
+      }
+    } catch (err) {
+      const errMsg = err.response?.data?.error || '清理失败，请检查网络或权限'
+      ElMessage.error(errMsg)
+    } finally {
+      pruneLoading.value = false
+    }
+  }).catch(() => {})
 }
 </script>
 
@@ -1205,4 +1448,79 @@ const handleLogout = () => {
 :deep(.el-table--enable-row-hover .el-table__body tr:hover > td.el-table__cell) {
   background-color: rgba(255, 255, 255, 0.02) !important;
 }
+
+/* commit hash 等宽字体 */
+.commit-hash {
+  font-family: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace;
+  font-size: 13px;
+  color: #79c0ff;
+  background: rgba(121, 192, 255, 0.08);
+  padding: 2px 6px;
+  border-radius: 4px;
+  letter-spacing: 0.5px;
+}
+
+/* 失败行整行淡红底 */
+:deep(.el-table .row-failed td.el-table__cell) {
+  background-color: rgba(248, 81, 73, 0.07) !important;
+}
+
+/* 侧边栏项目名行（含环境徽章） */
+.proj-name-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.env-badge {
+  flex-shrink: 0;
+}
+
+:deep(.env-badge .el-badge__content) {
+  font-size: 10px;
+  padding: 0 5px;
+  height: 16px;
+  line-height: 16px;
+  background: rgba(0, 180, 216, 0.4);
+  border: 1px solid rgba(0, 180, 216, 0.5);
+  color: #a8d8e8;
+}
+
+/* 骨架屏及动效 CSS */
+.diff-loading-skeleton {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: #0d1117;
+  border-radius: 6px;
+}
+.skeleton-bar {
+  height: 16px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 4px;
+  animation: skeleton-blink 1.2s infinite ease-in-out;
+}
+.skeleton-bar.wide {
+  width: 100%;
+}
+.skeleton-bar.medium {
+  width: 75%;
+}
+.skeleton-bar.narrow {
+  width: 45%;
+}
+@keyframes skeleton-blink {
+  0% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 0.7;
+  }
+  100% {
+    opacity: 0.35;
+  }
+}
 </style>
+

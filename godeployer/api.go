@@ -38,6 +38,13 @@ func SetupRoutesWithExecutor(config *Config, db *sql.DB, executor RemoteExecutor
 	r := gin.New()
 	r.Use(gin.Recovery())
 
+	if config.Global.DiffMaxSizeKB <= 0 {
+		config.Global.DiffMaxSizeKB = 2048
+	}
+	if config.Global.DiskMinSpaceMB <= 0 {
+		config.Global.DiskMinSpaceMB = 500
+	}
+
 	handler := &APIHandler{
 		config:   config,
 		db:       db,
@@ -81,6 +88,8 @@ func SetupRoutesWithExecutor(config *Config, db *sql.DB, executor RemoteExecutor
 			adminGrp.GET("/users/:username/git_binding", handler.HandleGetUserGitBinding)
 			adminGrp.PUT("/users/:username/git_binding", handler.HandleUpdateUserGitBinding)
 			adminGrp.PUT("/users/:username/permissions", handler.HandleUpdateUserPermissions)
+			// @Ref: docs/sps/plans/20260529_diff_ux_loading_plan.md | @Date: 2026-05-29
+			adminGrp.POST("/system/prune", handler.HandleSystemPrune)
 		}
 
 		// 部署操作权限：仅 admin 和 deployer 可访问
@@ -334,13 +343,53 @@ func (h *APIHandler) HandleGetProjectPreviewDiff(c *gin.Context) {
 		return
 	}
 
-	diffText, err := GetDiff(c.Request.Context(), projectID, fromCommit, toCommit)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to get diff: %v", err)})
-		return
+	// @Ref: docs/sps/plans/20260529_deploy_enhancements_plan.md | @Date: 2026-05-29
+	// 若 fromCommit 未指定，则通过数据库回溯上一次成功 commit
+	if fromCommit == "" {
+		envID := c.Query("env_id")
+		if envID != "" {
+			_ = h.db.QueryRow(`
+				SELECT commit_id 
+				FROM deploy_tasks 
+				WHERE project_id = ? AND env_id = ? AND status = 'success' 
+				ORDER BY id DESC LIMIT 1`, projectID, envID).Scan(&fromCommit)
+		}
+	}
+	if fromCommit == "" {
+		fromCommit = toCommit + "^"
 	}
 
-	c.JSON(http.StatusOK, gin.H{"diff": diffText})
+	diffText, err := GetDiff(c.Request.Context(), projectID, fromCommit, toCommit)
+	if err != nil {
+		// 降级：如果对比基准不存在，允许返回空内容，而不直接报错 500
+		diffText = "无法获取差异对比文本，可能是基准 Commit 在本地不存在。"
+	}
+
+	// 获取本次变更的文件列表树输入源
+	gitCacheDir := filepath.Join(h.config.Global.WorkspacePath, projectID, "repo_cache")
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "git", "diff", "--name-only", fromCommit, toCommit)
+	cmd.Dir = gitCacheDir
+	filesOutput, filesErr := cmd.CombinedOutput()
+	var fileList []string
+	if filesErr == nil {
+		lines := strings.Split(string(filesOutput), "\n")
+		for _, line := range lines {
+			trimmed := strings.TrimSpace(line)
+			if trimmed != "" {
+				fileList = append(fileList, trimmed)
+			}
+		}
+	} else {
+		fileList = make([]string, 0)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"diff":  diffText,
+		"files": fileList,
+	})
 }
 
 type UpdateGitBindingRequest struct {
@@ -500,9 +549,11 @@ func (h *APIHandler) HandleDeleteUser(c *gin.Context) {
 }
 
 type CreateTaskRequest struct {
-	ProjectID string `json:"project_id" binding:"required"`
-	EnvID     string `json:"env_id" binding:"required"`
-	CommitID  string `json:"commit_id" binding:"required"`
+	ProjectID    string `json:"project_id" binding:"required"`
+	EnvID        string `json:"env_id" binding:"required"`
+	CommitID     string `json:"commit_id" binding:"required"`
+	Description  string `json:"description"`
+	ExtraExclude string `json:"extra_exclude"`
 }
 
 func (h *APIHandler) HandleCreateTask(c *gin.Context) {
@@ -587,10 +638,10 @@ func (h *APIHandler) HandleCreateTask(c *gin.Context) {
 
 	// 插入任务记录（初始状态为 pending）
 	insertSQL := `
-		INSERT INTO deploy_tasks (project_id, env_id, commit_id, status, release_name, user_id, username, config_snapshot, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+		INSERT INTO deploy_tasks (project_id, env_id, commit_id, status, release_name, user_id, username, config_snapshot, description, extra_exclude, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 	
-	res, err := h.db.Exec(insertSQL, req.ProjectID, req.EnvID, req.CommitID, "pending", releaseName, userID, username, "{}", time.Now())
+	res, err := h.db.Exec(insertSQL, req.ProjectID, req.EnvID, req.CommitID, "pending", releaseName, userID, username, "{}", req.Description, req.ExtraExclude, time.Now())
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create task"})
 		return
@@ -629,6 +680,7 @@ func (h *APIHandler) HandleCreateTask(c *gin.Context) {
 	// 返回 201 Created 且携带审计人
 	c.JSON(http.StatusCreated, gin.H{
 		"id":           taskID,
+		"task_id":      taskID,
 		"project_id":   req.ProjectID,
 		"project_name": proj.Name,
 		"env_id":       req.EnvID,
@@ -644,7 +696,7 @@ func (h *APIHandler) HandleGetTasks(c *gin.Context) {
 	projectID := c.Query("project_id")
 	envID := c.Query("env_id")
 
-	query := `SELECT id, project_id, env_id, commit_id, status, release_name, username, created_at FROM deploy_tasks`
+	query := `SELECT id, project_id, env_id, commit_id, status, release_name, username, COALESCE(description, ''), COALESCE(extra_exclude, ''), created_at FROM deploy_tasks`
 	var args []interface{}
 
 	if projectID != "" && envID != "" {
@@ -661,20 +713,22 @@ func (h *APIHandler) HandleGetTasks(c *gin.Context) {
 	defer rows.Close()
 
 	type TaskRes struct {
-		ID          int64     `json:"id"`
-		ProjectID   string    `json:"project_id"`
-		EnvID       string    `json:"env_id"`
-		CommitID    string    `json:"commit_id"`
-		Status      string    `json:"status"`
-		ReleaseName string    `json:"release_name"`
-		Username    string    `json:"username"`
-		CreatedAt   time.Time `json:"created_at"`
+		ID           int64     `json:"id"`
+		ProjectID    string    `json:"project_id"`
+		EnvID        string    `json:"env_id"`
+		CommitID     string    `json:"commit_id"`
+		Status       string    `json:"status"`
+		ReleaseName  string    `json:"release_name"`
+		Username     string    `json:"username"`
+		Description  string    `json:"description"`
+		ExtraExclude string    `json:"extra_exclude"`
+		CreatedAt    time.Time `json:"created_at"`
 	}
 
 	tasks := make([]TaskRes, 0)
 	for rows.Next() {
 		var t TaskRes
-		if err := rows.Scan(&t.ID, &t.ProjectID, &t.EnvID, &t.CommitID, &t.Status, &t.ReleaseName, &t.Username, &t.CreatedAt); err == nil {
+		if err := rows.Scan(&t.ID, &t.ProjectID, &t.EnvID, &t.CommitID, &t.Status, &t.ReleaseName, &t.Username, &t.Description, &t.ExtraExclude, &t.CreatedAt); err == nil {
 			tasks = append(tasks, t)
 		}
 	}
@@ -919,10 +973,10 @@ func (h *APIHandler) HandleGetTaskDiff(c *gin.Context) {
 		return
 	}
 
-	// 1. 获取当前任务的 commit_id, project_id, release_name 及 status
-	var projectID, envID, currentCommit, releaseName, status string
-	err = h.db.QueryRow("SELECT project_id, env_id, commit_id, release_name, status FROM deploy_tasks WHERE id = ?", id).
-		Scan(&projectID, &envID, &currentCommit, &releaseName, &status)
+	// 1. 获取当前任务的 commit_id, project_id, release_name, status 及 created_at
+	var projectID, envID, currentCommit, releaseName, status, createdAt string
+	err = h.db.QueryRow("SELECT project_id, env_id, commit_id, release_name, status, created_at FROM deploy_tasks WHERE id = ?", id).
+		Scan(&projectID, &envID, &currentCommit, &releaseName, &status, &createdAt)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "task not found"})
 		return
@@ -939,6 +993,57 @@ func (h *APIHandler) HandleGetTaskDiff(c *gin.Context) {
 		return
 	}
 
+	// @Ref: docs/sps/plans/20260529_diff_ux_loading_plan.md | @Date: 2026-05-29
+	// 计算年月前缀以进行隔离归档
+	createdYM := "default"
+	if len(createdAt) >= 7 {
+		createdYM = strings.ReplaceAll(createdAt[:7], "-", "")
+	}
+	diffCacheDir := filepath.Join(h.config.Global.LogPath, "diffs", "projects", projectID, createdYM)
+	diffCacheFile := filepath.Join(diffCacheDir, fmt.Sprintf("task_%d_diff.log", id))
+
+	// 优先尝试读取持久化缓存
+	if data, readErr := os.ReadFile(diffCacheFile); readErr == nil {
+		contentStr := string(data)
+		var cacheObj struct {
+			Files string `json:"files"`
+			Diff  string `json:"diff"`
+		}
+		
+		if jsonErr := json.Unmarshal(data, &cacheObj); jsonErr == nil {
+			limitBytes := h.config.Global.DiffMaxSizeKB * 1024
+			diffText := cacheObj.Diff
+			if len(diffText) > limitBytes {
+				diffText = diffText[:limitBytes] + "\n\n... [DIFF OUT OF LIMIT, TRUNCATED FOR SAFETY]"
+			}
+			c.JSON(http.StatusOK, gin.H{
+				"files": cacheObj.Files,
+				"diff":  diffText,
+			})
+			return
+		}
+
+		if contentStr == "__EMPTY_DIFF__" {
+			c.JSON(http.StatusOK, gin.H{"diff": "首次部署，暂无对比基准。"})
+			return
+		}
+		if contentStr == "__DIFF_FAILED_PLACEHOLDER__" {
+			c.JSON(http.StatusOK, gin.H{"diff": "获取 diff 失败，请稍后重试"})
+			return
+		}
+		
+		limitBytes := h.config.Global.DiffMaxSizeKB * 1024
+		diffStr := contentStr
+		if len(diffStr) > limitBytes {
+			diffStr = diffStr[:limitBytes] + "\n\n... [DIFF OUT OF LIMIT, TRUNCATED FOR SAFETY]"
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"files": "旧版快照，暂无列表",
+			"diff":  diffStr,
+		})
+		return
+	}
+
 	// 2. 查出同一项目同环境下在此任务之前的最近一次成功发布的 commit_id
 	querySQL := `
 		SELECT commit_id 
@@ -950,6 +1055,8 @@ func (h *APIHandler) HandleGetTaskDiff(c *gin.Context) {
 	err = h.db.QueryRow(querySQL, projectID, envID, id).Scan(&prevCommit)
 	if err != nil {
 		if err == sql.ErrNoRows {
+			_ = os.MkdirAll(diffCacheDir, 0755)
+			_ = os.WriteFile(diffCacheFile, []byte("__EMPTY_DIFF__"), 0644)
 			c.JSON(http.StatusOK, gin.H{"diff": "首次部署，暂无对比基准。"})
 			return
 		}
@@ -983,24 +1090,54 @@ func (h *APIHandler) HandleGetTaskDiff(c *gin.Context) {
 	cmd.Dir = gitRepoPath
 
 	output, err := cmd.CombinedOutput()
+	diffStr := string(output)
+
 	if err != nil {
+		_ = os.MkdirAll(diffCacheDir, 0755)
+		_ = os.WriteFile(diffCacheFile, []byte("__DIFF_FAILED_PLACEHOLDER__"), 0644)
 		c.JSON(http.StatusOK, gin.H{"diff": fmt.Sprintf(
 			"git diff 执行失败（目录: %s）: %s\n输出: %s",
-			gitRepoPath, err.Error(), string(output),
+			gitRepoPath, err.Error(), diffStr,
 		)})
 		return
 	}
 
-	if len(strings.TrimSpace(string(output))) == 0 {
-		c.JSON(http.StatusOK, gin.H{"diff": fmt.Sprintf(
-			"两次提交内容完全相同（%s → %s），无代码变更。",
-			prevCommit[:8], currentCommit[:8],
-		)})
-		return
+	// 获取变更文件状态列表 (e.g. M src/App.vue)
+	var filesListStr string
+	filesCmd := exec.CommandContext(ctx, "git", "diff", "--name-status", prevCommit, currentCommit)
+	filesCmd.Dir = gitRepoPath
+	if filesOut, filesErr := filesCmd.CombinedOutput(); filesErr == nil {
+		filesListStr = string(filesOut)
+	} else {
+		filesListStr = "获取变更文件列表失败"
+	}
+
+	if len(strings.TrimSpace(diffStr)) == 0 {
+		diffStr = fmt.Sprintf("两次提交内容完全相同（%s → %s），无代码变更。", prevCommit[:8], currentCommit[:8])
+	}
+
+	// 写入缓存文件（含磁盘预留检测）
+	if getFreeDiskSpaceMB(h.config.Global.LogPath) >= h.config.Global.DiskMinSpaceMB {
+		_ = os.MkdirAll(diffCacheDir, 0755)
+		cacheMap := map[string]string{
+			"files": filesListStr,
+			"diff":  diffStr,
+		}
+		if cacheBytes, marshalErr := json.Marshal(cacheMap); marshalErr == nil {
+			_ = os.WriteFile(diffCacheFile, cacheBytes, 0644)
+		}
+	}
+
+	// 全局限额截断
+	limitBytes := h.config.Global.DiffMaxSizeKB * 1024
+	respDiffText := diffStr
+	if len(respDiffText) > limitBytes {
+		respDiffText = respDiffText[:limitBytes] + "\n\n... [DIFF OUT OF LIMIT, TRUNCATED FOR SAFETY]"
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"diff": string(output),
+		"files": filesListStr,
+		"diff":  respDiffText,
 	})
 }
 
@@ -1155,3 +1292,151 @@ func (h *APIHandler) HandleGithubWebhook(c *gin.Context) {
 
 	c.JSON(http.StatusCreated, gin.H{"message": "deployment triggered", "task_id": taskID})
 }
+
+// HandleSystemPrune 手动系统清理与脏数据自愈
+// @Ref: docs/sps/plans/20260529_diff_ux_loading_plan.md | @Date: 2026-05-29
+func (h *APIHandler) HandleSystemPrune(c *gin.Context) {
+	roleVal, _ := c.Get("role")
+	if roleVal.(string) != "admin" {
+		c.JSON(http.StatusForbidden, gin.H{"error": "admin role required"})
+		return
+	}
+
+	var prunedTasksCount, prunedOrphansCount int
+	var freedBytes int64
+
+	// 1. 主动老化清理
+	var idsToPrune []int64
+	var taskMap = make(map[int64][2]string) // taskID -> [projectID, createdAt]
+
+	// 基于天数老化
+	if h.config.Global.TaskRetainDays > 0 {
+		cutoffTime := time.Now().AddDate(0, 0, -h.config.Global.TaskRetainDays)
+		rows, err := h.db.Query(`
+			SELECT id, project_id, created_at 
+			FROM deploy_tasks 
+			WHERE status NOT IN ('pending', 'deploying') AND created_at < ?`, cutoffTime)
+		if err == nil {
+			for rows.Next() {
+				var id int64
+				var pid, createdAt string
+				if err := rows.Scan(&id, &pid, &createdAt); err == nil {
+					idsToPrune = append(idsToPrune, id)
+					taskMap[id] = [2]string{pid, createdAt}
+				}
+			}
+			rows.Close()
+		}
+	}
+
+	// 基于数量限额老化
+	if h.config.Global.TaskRetainMax > 0 {
+		var totalCount int
+		_ = h.db.QueryRow("SELECT COUNT(*) FROM deploy_tasks").Scan(&totalCount)
+		if totalCount > h.config.Global.TaskRetainMax {
+			excess := totalCount - h.config.Global.TaskRetainMax
+			rows, err := h.db.Query(`
+				SELECT id, project_id, created_at 
+				FROM deploy_tasks 
+				WHERE status NOT IN ('pending', 'deploying') 
+				ORDER BY id ASC LIMIT ?`, excess)
+			if err == nil {
+				for rows.Next() {
+					var id int64
+					var pid, createdAt string
+					if err := rows.Scan(&id, &pid, &createdAt); err == nil {
+						// 避免重复
+						if _, exists := taskMap[id]; !exists {
+							idsToPrune = append(idsToPrune, id)
+							taskMap[id] = [2]string{pid, createdAt}
+						}
+					}
+				}
+				rows.Close()
+			}
+		}
+	}
+
+	// 执行“先库后盘”第一步：从数据库删除
+	if len(idsToPrune) > 0 {
+		for _, id := range idsToPrune {
+			_, err := h.db.Exec("DELETE FROM deploy_tasks WHERE id = ?", id)
+			if err == nil {
+				prunedTasksCount++
+			}
+		}
+	}
+
+	// 执行“先库后盘”第二步：删除对应的物理文件，并累计释放大小
+	logDir := h.config.Global.LogPath
+	for _, id := range idsToPrune {
+		// 清理运行日志
+		logPath := filepath.Join(logDir, fmt.Sprintf("task_%d.log", id))
+		if fi, err := os.Stat(logPath); err == nil {
+			freedBytes += fi.Size()
+			_ = os.Remove(logPath)
+		}
+		
+		// 清理 diff 快照
+		meta := taskMap[id]
+		createdYM := "default"
+		if len(meta[1]) >= 7 {
+			createdYM = strings.ReplaceAll(meta[1][:7], "-", "")
+		}
+		diffFile := filepath.Join(logDir, "diffs", "projects", meta[0], createdYM, fmt.Sprintf("task_%d_diff.log", id))
+		if fi, err := os.Stat(diffFile); err == nil {
+			freedBytes += fi.Size()
+			_ = os.Remove(diffFile)
+		}
+	}
+
+	// 2. 脏数据/孤儿文件物理自愈
+	// 遍历 LogPath 根目录清除孤儿日志文件
+	if files, err := os.ReadDir(logDir); err == nil {
+		for _, file := range files {
+			if !file.IsDir() && strings.HasPrefix(file.Name(), "task_") && strings.HasSuffix(file.Name(), ".log") {
+				var id int64
+				_, scanErr := fmt.Sscanf(file.Name(), "task_%d.log", &id)
+				if scanErr == nil {
+					var exists int
+					err := h.db.QueryRow("SELECT COUNT(*) FROM deploy_tasks WHERE id = ?", id).Scan(&exists)
+					if err == nil && exists == 0 {
+						filePath := filepath.Join(logDir, file.Name())
+						if fi, statErr := os.Stat(filePath); statErr == nil {
+							freedBytes += fi.Size()
+							_ = os.Remove(filePath)
+							prunedOrphansCount++
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// 遍历 LogPath/diffs/projects 清除孤儿 diff 快照
+	diffsRoot := filepath.Join(logDir, "diffs", "projects")
+	_ = filepath.Walk(diffsRoot, func(path string, info os.FileInfo, err error) error {
+		if err == nil && !info.IsDir() && strings.HasPrefix(info.Name(), "task_") && strings.HasSuffix(info.Name(), "_diff.log") {
+			var id int64
+			_, scanErr := fmt.Sscanf(info.Name(), "task_%d_diff.log", &id)
+			if scanErr == nil {
+				var exists int
+				err := h.db.QueryRow("SELECT COUNT(*) FROM deploy_tasks WHERE id = ?", id).Scan(&exists)
+				if err == nil && exists == 0 {
+					freedBytes += info.Size()
+					_ = os.Remove(path)
+					prunedOrphansCount++
+				}
+			}
+		}
+		return nil
+	})
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":               "system prune and self-healing completed",
+		"pruned_tasks_count":    prunedTasksCount,
+		"pruned_orphans_count":  prunedOrphansCount,
+		"freed_bytes":           freedBytes,
+	})
+}
+

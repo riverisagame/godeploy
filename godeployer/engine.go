@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 )
@@ -247,9 +248,9 @@ func (e *DeployEngine) RunDeploy(ctx context.Context, taskID int64, config *Conf
 	}
 
 	// 从数据库查询任务信息
-	var projectID, envID, commitID, releaseName string
-	err := e.db.QueryRow("SELECT project_id, env_id, commit_id, release_name FROM deploy_tasks WHERE id = ?", taskID).
-		Scan(&projectID, &envID, &commitID, &releaseName)
+	var projectID, envID, commitID, releaseName, extraExclude string
+	err := e.db.QueryRow("SELECT project_id, env_id, commit_id, release_name, extra_exclude FROM deploy_tasks WHERE id = ?", taskID).
+		Scan(&projectID, &envID, &commitID, &releaseName, &extraExclude)
 	if err != nil {
 		log.Printf("[Task %d] Failed to query task: %v", taskID, err)
 		e.UpdateTaskStatus(taskID, "failed")
@@ -363,6 +364,22 @@ func (e *DeployEngine) RunDeploy(ctx context.Context, taskID int64, config *Conf
 				if sshExec, ok := executor.(*SSHExecutor); ok {
 					sshExec.Ctx = ctx
 				}
+			}
+
+			// 合并静态与动态排除规则，注入到 executor 的 ExcludeList 中
+			// @Ref: docs/sps/plans/20260529_deploy_enhancements_plan.md | @Date: 2026-05-29
+			var totalExcludes []string
+			totalExcludes = append(totalExcludes, proj.Exclude...)
+			if extraExclude != "" {
+				for _, part := range strings.Split(extraExclude, ",") {
+					part = strings.TrimSpace(part)
+					if part != "" {
+						totalExcludes = append(totalExcludes, part)
+					}
+				}
+			}
+			if sshExec, ok := executor.(*SSHExecutor); ok {
+				sshExec.ExcludeList = totalExcludes
 			}
 
 			// 检查目标机 releases 目录是否存在

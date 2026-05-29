@@ -43,3 +43,5 @@
 | 2026-05-29 | DEMO-001 | PHP_DEMO_ENV    | scripts/demo.sh, demo_projects.d/, README_DEMO.md | COMPLETED |
 | 2026-05-29 | FIX-001  | DIFF_FALLBACK   | godeployer/api.go (findGitRepo) | COMPLETED |
 | 2026-05-29 | UI-001   | DARK_DIFF_THEME | web/src/views/Dashboard.vue (.dark-diff) | COMPLETED |
+| 2026-05-29 | UI-002   | DIFF_UX_LOADING | docs/sps/plans/20260529_diff_ux_loading_plan.md | COMPLETED |
+| 2026-05-29 | ARCH-010 | DEPLOY_ENHANCE  | docs/sps/plans/20260529_deploy_enhancements_plan.md | COMPLETED |
