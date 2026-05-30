@@ -216,31 +216,14 @@
       </div>
     </el-dialog>
 
-    <!-- 账号配置弹窗 -->
-    <el-dialog v-model="settingVisible" title="账号部署权限配置" width="500px">
-      <el-form :model="settingForm" label-width="120px" label-position="top">
-        <el-form-item label="启用白名单限制">
-          <el-switch v-model="settingForm.restrict_git_authors" />
-          <div style="font-size: 12px; color: #888; margin-top: 4px;">
-            开启后，你只能部署白名单作者提交的代码。
-          </div>
-        </el-form-item>
-        <el-form-item label="Git 作者白名单" v-if="settingForm.restrict_git_authors">
-          <el-input 
-            v-model="settingForm.bound_git_authors" 
-            placeholder="输入 Git Author 名称或邮箱，多个用逗号分隔" 
-            type="textarea"
-            :rows="3"
-          />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <span class="dialog-footer">
-          <el-button @click="settingVisible = false">取消</el-button>
-          <el-button type="primary" @click="saveSettings" :loading="savingSettings">保存配置</el-button>
-        </span>
-      </template>
-    </el-dialog>
+    <UserSettingsDialog
+      :visible="settingVisible"
+      :restrictGitAuthors="settingForm.restrict_git_authors"
+      :boundGitAuthors="settingForm.bound_git_authors"
+      :saving="savingSettings"
+      @close="settingVisible = false"
+      @save="saveSettings"
+    />
   </div>
 </template>
 
@@ -250,6 +233,7 @@ import ProjectSidebar from '../components/ProjectSidebar.vue'
 import DeployForm from '../components/DeployForm.vue'
 import DeployHistoryTable from '../components/DeployHistoryTable.vue'
 import LogTerminal from '../components/LogTerminal.vue'
+import UserSettingsDialog from '../components/UserSettingsDialog.vue'
 import { html } from 'diff2html'
 import 'diff2html/bundles/css/diff2html.min.css'
 import { useRouter } from 'vue-router'
@@ -566,17 +550,13 @@ const openSettings = async () => {
   }
 }
 
-const saveSettings = async () => {
+const saveSettings = async (form: { restrict_git_authors: boolean; bound_git_authors: string }) => {
   savingSettings.value = true
   try {
-    await axios.put(`/api/users/${currentUser.value}/git_binding`, {
-      restrict_git_authors: settingForm.restrict_git_authors,
-      bound_git_authors: settingForm.bound_git_authors
-    })
+    await axios.put(`/api/users/${currentUser.value}/git_binding`, form)
     ElMessage.success('配置保存成功')
     settingVisible.value = false
   } catch(err) {
-    console.error(err)
     ElMessage.error('配置保存失败')
   } finally {
     savingSettings.value = false
