@@ -27,26 +27,11 @@
     </header>
 
     <div class="main-layout">
-      <!-- 左侧项目选择栏 -->
-      <aside class="sidebar">
-        <div class="sidebar-title">部署项目</div>
-        <el-scrollbar>
-          <div 
-            v-for="proj in projects" 
-            :key="proj.id" 
-            class="project-item"
-            :class="{ active: selectedProject?.id === proj.id }"
-            @click="selectProject(proj)"
-          >
-            <div class="proj-name-row">
-              <span class="proj-name">{{ proj.name }}</span>
-              <el-badge :value="proj.environments?.length || 0" type="info" class="env-badge" />
-            </div>
-            <div class="proj-id">{{ proj.id }}</div>
-          </div>
-          <el-empty v-if="projects.length === 0" description="未加载到项目配置" :image-size="60" />
-        </el-scrollbar>
-      </aside>
+      <ProjectSidebar
+        :projects="projects"
+        :selectedId="selectedProject?.id || ''"
+        @select-project="selectProject"
+      />
 
       <!-- 右侧主工作区 -->
       <main class="content-area">
@@ -418,6 +403,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted, reactive, nextTick, computed } from 'vue'
+import ProjectSidebar from '../components/ProjectSidebar.vue'
 import { html } from 'diff2html'
 import 'diff2html/bundles/css/diff2html.min.css'
 import { useRouter } from 'vue-router'
