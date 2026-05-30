@@ -129,92 +129,23 @@
       @status-changed="(s: string) => { if (selectedProject) fetchHistory(selectedProject.id, activeEnvTab) }"
     />
 
-    <!-- Git Diff 差异对比弹窗 -->
-    <el-dialog
-      v-model="diffVisible"
-      :title="diffTaskInfo ? `代码对比 · ${diffTaskInfo}` : 'Git 代码差异对比'"
-      fullscreen
-      destroy-on-close
-      @close="deployState.phase = 'idle'"
+    <DiffDialog
+      :visible="diffVisible"
+      :projectId="selectedProject?.id || ''"
+      :envId="activeEnvTab"
+      :branch="deployForm.branch"
+      :targetType="deployForm.targetType"
+      :showCheckbox="deployState.phase === 'confirming'"
+      :taskId="currentDiffTaskId"
+      @close="handleDiffClose"
     >
-      <div style="margin-bottom: 15px; display: flex; justify-content: space-between; align-items: center;">
-        <div class="diff-actions" style="display: flex; align-items: center; gap: 12px;">
-          <el-button v-if="deployState.phase === 'confirming'" type="primary" size="large" @click="executeDeploy">
-            <el-icon><Upload /></el-icon> 确认并部署
-          </el-button>
-          <el-button v-if="deployState.phase === 'confirming'" size="large" @click="diffVisible = false; deployState.phase = 'idle'">取消部署</el-button>
-
-          <!-- 双对比按钮切换 -->
-          <el-radio-group v-model="currentDiffType" size="default" @change="handleDiffTypeChange" :disabled="loadingDiff">
-            <el-radio-button value="live" :disabled="deployState.phase !== 'confirming' && activeTask && activeTask.target_type !== 'commit'">
-              <!-- @Ref: docs/sps/plans/20260530_live_diff_tooltip_plan.md | @Date: 2026-05-30 -->
-              <el-tooltip
-                content="全量部署 (Branch/Tag) 历史仅归档本地变更 (Git Log Diff)，无 Live Diff 归档。仅 Commit 部署支持查看历史 Live Diff 快照。"
-                placement="top"
-                :disabled="deployState.phase === 'confirming' || !activeTask || activeTask.target_type === 'commit'"
-              >
-                <span>与线上对比 (Live Diff)</span>
-              </el-tooltip>
-            </el-radio-button>
-            <el-radio-button value="git_log">本地变更 (Git Log Diff)</el-radio-button>
-          </el-radio-group>
-        </div>
-        <el-radio-group v-model="diffFormat" size="small" :disabled="loadingDiff">
-          <el-radio-button value="line-by-line">竖向对比</el-radio-button>
-          <el-radio-button value="side-by-side">横向对比</el-radio-button>
-        </el-radio-group>
-      </div>
-
-      <!-- 加载中：骨架屏 -->
-      <div v-if="loadingDiff" class="diff-loading-skeleton">
-        <div class="skeleton-bar wide"></div>
-        <div class="skeleton-bar medium"></div>
-        <div class="skeleton-bar narrow" style="background: rgba(63,185,80,0.15);"></div>
-        <div class="skeleton-bar wide"></div>
-        <div class="skeleton-bar medium" style="background: rgba(248,81,73,0.15);"></div>
-        <div class="skeleton-bar narrow"></div>
-        <div class="skeleton-bar wide"></div>
-        <div class="skeleton-bar medium" style="background: rgba(63,185,80,0.15);"></div>
-        <div class="skeleton-bar narrow"></div>
-        <div class="skeleton-bar wide"></div>
-        <div style="text-align:center; margin-top: 32px; color: #484f58; font-size: 14px;">
-          <el-icon class="is-loading" style="margin-right: 6px;"><Loading /></el-icon>
-          正在获取代码差异...
-        </div>
-      </div>
-
-      <!-- 加载完成：左右分栏高品质对比视图 -->
-      <div v-else class="diff-split-layout">
-        <!-- 左侧：文件选择侧边栏 -->
-        <div class="diff-left-sidebar" style="max-height: calc(100vh - 240px); overflow-y: auto;">
-          <div style="font-size: 12px; color: #8a99ad; margin-bottom: 10px; font-weight: 600;">
-            变更文件过滤 (取消勾选排除同步)
-          </div>
-          <el-tree
-            :key="deployState.phase + '-' + fileTreeData.length"
-            ref="fileTreeRef"
-            :data="fileTreeData"
-            :show-checkbox="deployState.phase === 'confirming'"
-            node-key="path"
-            default-expand-all
-            :default-checked-keys="defaultCheckedKeys"
-            :props="{ label: 'label', children: 'children' }"
-            @node-click="handleFileTreeNodeClick"
-            style="background: transparent; color: #e0e0e0;"
-          />
-        </div>
-
-        <!-- 右侧：代码 Diff 展示区域 -->
-        <div class="diff-right-content" v-loading="loadingFileDiff" element-loading-background="rgba(11, 14, 20, 0.8)">
-          <div v-if="selectedDiffFile" class="diff-container dark-diff" style="height: 100%; overflow-y: auto;" v-html="highlightedDiff">
-          </div>
-          <div v-else class="diff-empty-placeholder">
-            <el-icon size="48" color="#30363d"><Document /></el-icon>
-            <p>请在左侧文件列表中选择要查看差异的文件</p>
-          </div>
-        </div>
-      </div>
-    </el-dialog>
+      <template #actions>
+        <el-button v-if="deployState.phase === 'confirming'" type="primary" size="large" @click="executeDeploy">
+          <el-icon><Upload /></el-icon> 确认并部署
+        </el-button>
+        <el-button v-if="deployState.phase === 'confirming'" size="large" @click="diffVisible = false; deployState.phase = 'idle'">取消部署</el-button>
+      </template>
+    </DiffDialog>
 
     <UserSettingsDialog
       :visible="settingVisible"
@@ -234,6 +165,7 @@ import DeployForm from '../components/DeployForm.vue'
 import DeployHistoryTable from '../components/DeployHistoryTable.vue'
 import LogTerminal from '../components/LogTerminal.vue'
 import UserSettingsDialog from '../components/UserSettingsDialog.vue'
+import DiffDialog from '../components/DiffDialog.vue'
 import { html } from 'diff2html'
 import 'diff2html/bundles/css/diff2html.min.css'
 import { useRouter } from 'vue-router'

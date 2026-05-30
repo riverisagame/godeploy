@@ -8,6 +8,7 @@
   >
     <div style="margin-bottom:15px;display:flex;justify-content:space-between;align-items:center">
       <div class="diff-actions" style="display:flex;align-items:center;gap:12px">
+        <slot name="actions" />
         <el-radio-group v-model="currentDiffType" size="default" :disabled="loadingDiff">
           <el-radio-button value="live">与线上对比 (Live Diff)</el-radio-button>
           <el-radio-button value="git_log">本地变更 (Git Log Diff)</el-radio-button>
