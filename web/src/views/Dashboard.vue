@@ -185,23 +185,7 @@
                       />
                     </el-form-item>
 
-                    <div v-if="rawFilesList.length > 0" class="file-filter-wrapper" style="margin-top: 15px; margin-bottom: 20px;">
-                      <div class="filter-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                        <span style="font-size: 13px; font-weight: 600; color: #8a99ad;">上线文件过滤 (取消勾选排除同步)</span>
-                        <el-tag size="small" type="info">共 {{ rawFilesList.length }} 个文件</el-tag>
-                      </div>
-                      <div style="border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 6px; padding: 10px; background-color: #0b0e14; max-height: 240px; overflow-y: auto;">
-                        <el-tree
-                          ref="fileTreeRef"
-                          :data="fileTreeData"
-                          show-checkbox
-                          node-key="path"
-                          default-expand-all
-                          :default-checked-keys="defaultCheckedKeys"
-                          :props="{ label: 'label', children: 'children' }"
-                        />
-                      </div>
-                    </div>
+
 
                     <div style="display: flex; gap: 10px; margin-top: 20px;">
                       <el-button 
@@ -323,8 +307,30 @@
       :title="diffTaskInfo ? `代码对比 · ${diffTaskInfo}` : 'Git 代码差异对比'"
       fullscreen
       destroy-on-close
+      @close="deployState.phase = 'idle'"
     >
-      <div style="margin-bottom: 15px; display: flex; justify-content: flex-end;">
+      <div style="margin-bottom: 15px; display: flex; justify-content: space-between; align-items: center;">
+        <div class="diff-actions" style="display: flex; align-items: center; gap: 12px;">
+          <el-button v-if="deployState.phase === 'confirming'" type="primary" size="large" @click="executeDeploy">
+            <el-icon><Upload /></el-icon> 确认并部署
+          </el-button>
+          <el-button v-if="deployState.phase === 'confirming'" size="large" @click="diffVisible = false; deployState.phase = 'idle'">取消部署</el-button>
+
+          <!-- 双对比按钮切换 -->
+          <el-radio-group v-model="currentDiffType" size="default" @change="handleDiffTypeChange" :disabled="loadingDiff">
+            <el-radio-button value="live" :disabled="deployState.phase !== 'confirming' && activeTask && activeTask.target_type !== 'commit'">
+              <!-- @Ref: docs/sps/plans/20260530_live_diff_tooltip_plan.md | @Date: 2026-05-30 -->
+              <el-tooltip
+                content="全量部署 (Branch/Tag) 历史仅归档本地变更 (Git Log Diff)，无 Live Diff 归档。仅 Commit 部署支持查看历史 Live Diff 快照。"
+                placement="top"
+                :disabled="deployState.phase === 'confirming' || !activeTask || activeTask.target_type === 'commit'"
+              >
+                <span>与线上对比 (Live Diff)</span>
+              </el-tooltip>
+            </el-radio-button>
+            <el-radio-button value="git_log">本地变更 (Git Log Diff)</el-radio-button>
+          </el-radio-group>
+        </div>
         <el-radio-group v-model="diffFormat" size="small" :disabled="loadingDiff">
           <el-radio-button value="line-by-line">竖向对比</el-radio-button>
           <el-radio-button value="side-by-side">横向对比</el-radio-button>
@@ -349,30 +355,37 @@
         </div>
       </div>
 
-      <!-- 加载完成：双视角 Tab 切换 -->
-      <el-tabs v-else v-model="activeDiffTab" class="diff-tabs" type="card">
-        <el-tab-pane label="变更文件列表" name="files">
-          <div class="files-view-container" style="background: #0d1117; padding: 16px; border-radius: 6px; height: calc(100vh - 180px); overflow-y: auto;">
-            <el-table :data="parsedDiffFiles" style="width: 100%" size="small" border>
-              <el-table-column label="状态" width="100">
-                <template #default="scope">
-                  <el-tag :type="getFileStatusTagType(scope.row.status)" effect="dark">
-                    {{ scope.row.statusText }}
-                  </el-tag>
-                </template>
-              </el-table-column>
-              <el-table-column prop="path" label="文件相对路径" />
-            </el-table>
+      <!-- 加载完成：左右分栏高品质对比视图 -->
+      <div v-else class="diff-split-layout">
+        <!-- 左侧：文件选择侧边栏 -->
+        <div class="diff-left-sidebar" style="max-height: calc(100vh - 240px); overflow-y: auto;">
+          <div style="font-size: 12px; color: #8a99ad; margin-bottom: 10px; font-weight: 600;">
+            变更文件过滤 (取消勾选排除同步)
           </div>
-        </el-tab-pane>
-        <el-tab-pane label="代码差异比对 (Diff)" name="diff">
-          <div class="diff-container dark-diff"
-            style="height: calc(100vh - 180px); overflow-y: auto; background: #0d1117; padding: 16px; border-radius: 6px;"
-            v-html="highlightedDiff"
-          >
+          <el-tree
+            :key="deployState.phase + '-' + fileTreeData.length"
+            ref="fileTreeRef"
+            :data="fileTreeData"
+            :show-checkbox="deployState.phase === 'confirming'"
+            node-key="path"
+            default-expand-all
+            :default-checked-keys="defaultCheckedKeys"
+            :props="{ label: 'label', children: 'children' }"
+            @node-click="handleFileTreeNodeClick"
+            style="background: transparent; color: #e0e0e0;"
+          />
+        </div>
+
+        <!-- 右侧：代码 Diff 展示区域 -->
+        <div class="diff-right-content" v-loading="loadingFileDiff" element-loading-background="rgba(11, 14, 20, 0.8)">
+          <div v-if="selectedDiffFile" class="diff-container dark-diff" style="height: 100%; overflow-y: auto;" v-html="highlightedDiff">
           </div>
-        </el-tab-pane>
-      </el-tabs>
+          <div v-else class="diff-empty-placeholder">
+            <el-icon size="48" color="#30363d"><Document /></el-icon>
+            <p>请在左侧文件列表中选择要查看差异的文件</p>
+          </div>
+        </div>
+      </div>
     </el-dialog>
 
     <!-- 账号配置弹窗 -->
@@ -404,13 +417,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, reactive, nextTick, computed, watch } from 'vue'
+import { ref, onMounted, reactive, nextTick, computed } from 'vue'
 import { html } from 'diff2html'
 import 'diff2html/bundles/css/diff2html.min.css'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import axios from 'axios'
-import { getStatusTagType, getStatusText, formatTime, buildWSUrl } from '../utils/deploy'
+import { getStatusTagType, getStatusText, formatTime, buildWSUrl, createDeployState } from '../utils/deploy'
 
 const router = useRouter()
 const currentUser = ref(localStorage.getItem('username') || 'Admin')
@@ -467,6 +480,12 @@ const fileTreeRef = ref<any>(null)
 const activeDiffTab = ref('files')
 const parsedDiffFiles = ref<any[]>([])
 
+// @Ref: docs/sps/plans/20260530_lazy_load_file_diff_plan.md | @Date: 2026-05-30
+const selectedDiffFile = ref('')
+const loadingFileDiff = ref(false)
+const currentDiffTaskId = ref<number | null>(null)
+
+
 // 扁平路径构建 el-tree 树形嵌套数据
 const buildTree = (paths: string[]) => {
   const root: any[] = []
@@ -495,26 +514,7 @@ const buildTree = (paths: string[]) => {
   return root
 }
 
-// 监听选定的版本分支，自动调用 preview_diff 接口获取变更文件树
-watch(() => deployForm.branch, async (newVal) => {
-  if (!selectedProject.value || !newVal) {
-    rawFilesList.value = []
-    fileTreeData.value = []
-    defaultCheckedKeys.value = []
-    return
-  }
-  try {
-    const res = await axios.get(`/api/projects/${selectedProject.value.id}/preview_diff`, {
-      params: { to: newVal, env_id: activeEnvTab.value }
-    })
-    const files = res.data.files || []
-    rawFilesList.value = files
-    fileTreeData.value = buildTree(files)
-    defaultCheckedKeys.value = [...files]
-  } catch (err) {
-    console.error('Failed to preview diff files', err)
-  }
-})
+
 
 const commitFilters = reactive({
   keyword: '',
@@ -544,6 +544,8 @@ const fetchCommits = async () => {
     loadingCommits.value = false
   }
 }
+const deployState = reactive(createDeployState())
+const pendingDeployEnv = ref<Environment | null>(null)
 const loadingPreviewDiff = ref(false)
 
 const previewDeployDiff = async (env: Environment) => {
@@ -553,19 +555,88 @@ const previewDeployDiff = async (env: Environment) => {
   }
   loadingPreviewDiff.value = true
   try {
-    // 假设用线上最新发布作为 from，这里简化为只比较当前提交本身（如果要线上最新，需要查询最后一次成功发布的 commit_id）
-    // 当前实现：from 为空时 git_cache 将默认比较 deployForm.branch 的内部修改（相当于 git show）
+    currentDiffType.value = 'live'
+    activeTask.value = null
     const res = await axios.get(`/api/projects/${selectedProject.value.id}/preview_diff`, {
-      params: { to: deployForm.branch }
+      params: { to: deployForm.branch, env_id: env.id, target_type: deployForm.targetType }
     })
-    diffText.value = res.data.diff || '无变更内容'
+    // 初始预览只拉列表，diffText.value 置空，待点击时懒加载单个文件 diff
+    diffText.value = ''
+    selectedDiffFile.value = ''
+    const files = res.data.files || []
+    
+    // @Ref: docs/sps/plans/20260530_fix_file_tree_rendering_plan.md | @Date: 2026-05-30
+    rawFilesList.value = files
+    parsedDiffFiles.value = files.map((f: string) => ({ status: 'M', statusText: '变更', path: f }))
+    fileTreeData.value = buildTree(files)
+    defaultCheckedKeys.value = [...files]
+    
+    diffTaskInfo.value = deployState.phase === 'confirming' ? '部署前确认' : '变更预览'
+    activeDiffTab.value = 'files'
     diffVisible.value = true
+
+    if (files.length > 0) {
+      nextTick(async () => {
+        const firstFile = files[0]
+        selectedDiffFile.value = firstFile
+        await loadSingleFileDiff(firstFile)
+        if (fileTreeRef.value) {
+          fileTreeRef.value.setCurrentKey(firstFile)
+        }
+      })
+    }
   } catch(err) {
     ElMessage.error('获取对比失败')
   } finally {
     loadingPreviewDiff.value = false
   }
 }
+
+// @Ref: docs/sps/plans/20260530_lazy_load_file_diff_plan.md | @Date: 2026-05-30
+const loadSingleFileDiff = async (path: string) => {
+  if (!selectedProject.value) return
+  loadingFileDiff.value = true
+  diffText.value = ''
+  try {
+    if (deployState.phase === 'confirming' || diffTaskInfo.value === '变更预览') {
+      const res = await axios.get(`/api/projects/${selectedProject.value.id}/preview_diff`, {
+        params: {
+          to: deployForm.branch,
+          env_id: activeEnvTab.value,
+          file: path,
+          diff_type: currentDiffType.value
+        }
+      })
+      diffText.value = res.data.diff || '该文件无代码变更差异。'
+    } else {
+      if (currentDiffTaskId.value) {
+        const res = await axios.get(`/api/tasks/${currentDiffTaskId.value}/diff`, {
+          params: { 
+            file: path,
+            diff_type: currentDiffType.value
+          }
+        })
+        diffText.value = res.data.diff || '该文件无代码变更差异。'
+      }
+    }
+  } catch (err) {
+    diffText.value = '加载文件差异失败，请重试。'
+  } finally {
+    loadingFileDiff.value = false
+  }
+}
+
+// @Ref: docs/sps/plans/20260530_embed_file_tree_in_diff_dialog_plan.md | @Date: 2026-05-30
+const handleFileTreeNodeClick = async (nodeData: any) => {
+  if (!nodeData || nodeData.path === '暂无变更文件解析数据') return
+  // 仅在点击叶子文件节点时，才触发右侧 lazy-load 差异查看，避免点击文件夹节点触发
+  if (!nodeData.children) {
+    selectedDiffFile.value = nodeData.path
+    await loadSingleFileDiff(nodeData.path)
+  }
+}
+
+
 
 // 弹窗状态
 const logVisible = ref(false)
@@ -577,6 +648,14 @@ let wsConnection: WebSocket | null = null
 
 const diffVisible = ref(false)
 const diffText = ref('')
+const currentDiffType = ref('live')
+const activeTask = ref<any>(null)
+
+const handleDiffTypeChange = async () => {
+  if (selectedDiffFile.value) {
+    await loadSingleFileDiff(selectedDiffFile.value)
+  }
+}
 const diffFormat = ref('side-by-side')
 const loadingDiff = ref(false)
 const diffTaskInfo = ref('')
@@ -584,11 +663,35 @@ const pruneLoading = ref(false)
 
 const highlightedDiff = computed(() => {
   if (!diffText.value) return ''
-  return html(diffText.value, {
-    drawFileList: true,
-    matching: 'lines',
-    outputFormat: diffFormat.value,
-  })
+  let text = diffText.value
+  // @Ref: docs/sps/plans/20260530_diff_click_freeze_plan.md | @Date: 2026-05-30
+  // 下调安全截断上限为 100KB (大约 1500+ 行代码)，保障高可读性的同时绝不拖垮前端 DOM
+  const LIMIT = 100 * 1024
+  if (text.length > LIMIT) {
+    text = text.substring(0, LIMIT) + '\n\n... [浏览器前端保护: 差异文本过大，为防止界面卡死已截断前 100KB 显示]'
+  }
+  try {
+    // 强制关闭 diff2html 的匹配匹配模式，避免大文件 Levenshtein 动态规划指数级匹配拖挂浏览器主线程
+    return html(text, {
+      drawFileList: true,
+      matching: 'none',
+      outputFormat: diffFormat.value,
+    })
+  } catch (e) {
+    // 若因为截断导致语法树错误，降级为原生 HTML 转义展示
+    const escapeHtml = (unsafe: string) => {
+      return unsafe
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+    }
+    return `<div style="padding: 15px; color: #ff7b72; background: #2d1010; border-radius: 6px; border: 1px solid #5c1a1a; margin-bottom: 10px;">
+              ⚠️ 解析差异高亮失败或存在部分截断，已降级为原生展示模式。
+            </div>
+            <pre class="diff-pre" style="color: #cdd9e5; background: #0d1117; padding: 15px; overflow-x: auto;">${escapeHtml(text)}</pre>`
+  }
 })
 const refsList = ref<{name: string, type: string, hash: string}[]>([])
 const loadingRefs = ref(false)
@@ -690,18 +793,13 @@ const handleEnvTabChange = (envId: any) => {
 
 const fetchHistory = async (projectId: string, envId: string) => {
   try {
-    // 拉取部署记录历史的 Mock API，在后端将暴露该接口
     const res = await axios.get('/api/tasks', {
       params: { project_id: projectId, env_id: envId }
     })
     historyTasks.value = res.data
   } catch (error) {
-    // 如果后端 API 还未全部整合，使用优雅退化 Mock 展示数据
-    historyTasks.value = [
-      { id: 3, release_name: '20260527101500', commit_id: 'a7b3c2d', username: 'admin', status: 'success', created_at: new Date().toISOString() },
-      { id: 2, release_name: '20260527100000', commit_id: 'f9c2d1b', username: 'admin', status: 'success', created_at: new Date(Date.now() - 15 * 60 * 1000).toISOString() },
-      { id: 1, release_name: '20260527094000', commit_id: 'e1d4c3b', username: 'admin', status: 'rolled_back', created_at: new Date(Date.now() - 35 * 60 * 1000).toISOString() }
-    ]
+    console.error('获取部署历史失败', error)
+    historyTasks.value = []
   }
 }
 
@@ -709,43 +807,49 @@ const fetchHistory = async (projectId: string, envId: string) => {
 
 // 触发部署上线
 const triggerDeploy = async (env: Environment) => {
-  if (!selectedProject.value) return
+  if (!selectedProject.value || !deployForm.branch) {
+    ElMessage.warning('请选择项目和上线版本')
+    return
+  }
+  deployState.phase = 'confirming'
+  pendingDeployEnv.value = env
+  await previewDeployDiff(env)
+}
 
-  ElMessageBox.confirm(`确定要部署项目 [${selectedProject.value.name}] 到 [${env.name}] 环境吗？`, '触发上线', {
-    confirmButtonText: '确定部署',
-    cancelButtonText: '取消',
-    type: 'warning'
-  }).then(async () => {
-    try {
-      // 获取未勾选的叶子节点相对路径，用作 extra_exclude
-      let extraExclude = ''
-      if (fileTreeRef.value && rawFilesList.value.length > 0) {
-        const checkedKeys = fileTreeRef.value.getCheckedKeys(true) || []
-        const excludes = rawFilesList.value.filter(file => !checkedKeys.includes(file))
-        extraExclude = excludes.join(',')
+const executeDeploy = async () => {
+  const env = pendingDeployEnv.value
+  if (!env || !selectedProject.value) return
+
+  try {
+    let extraExclude = ''
+    if (fileTreeRef.value && rawFilesList.value.length > 0) {
+      let checkedKeys: string[] = []
+      if (typeof (fileTreeRef.value as any).getCheckedKeys === 'function') {
+        checkedKeys = (fileTreeRef.value as any).getCheckedKeys(true) || []
       }
-
-      const res = await axios.post('/api/tasks', {
-        project_id: selectedProject.value?.id,
-        env_id: env.id,
-        commit_id: deployForm.commit || deployForm.branch,
-        description: deployForm.description,
-        extra_exclude: extraExclude
-      })
-
-      const task = res.data
-      showLog(task)
-
-      // 部署发起成功后，清空本次备注
-      deployForm.description = ''
-      
-      // 刷新历史
-      fetchHistory(selectedProject.value!.id, env.id)
-      ElMessage.success('部署触发成功')
-    } catch (err) {
-      ElMessage.error('无法发起部署任务')
+      const excludes = rawFilesList.value.filter((file: string) => !checkedKeys.includes(file))
+      extraExclude = excludes.join(',')
     }
-  })
+
+    const res = await axios.post('/api/tasks', {
+      project_id: selectedProject.value.id,
+      env_id: env.id,
+      commit_id: deployForm.commit || deployForm.branch,
+      description: deployForm.description,
+      extra_exclude: extraExclude
+    })
+
+    const task = res.data
+    diffVisible.value = false
+    deployState.phase = 'idle'
+    showLog(task)
+
+    deployForm.description = ''
+    fetchHistory(selectedProject.value.id, env.id)
+    ElMessage.success('部署触发成功')
+  } catch (err) {
+    ElMessage.error('无法发起部署任务')
+  }
 }
 
 // 自动滚动探底
@@ -826,7 +930,10 @@ const setupWebSocket = (taskId: number) => {
     if (renderFrame) cancelAnimationFrame(renderFrame)
     // 如果任务仍在进行中，执行优雅降级（HTTP 轮询 fallback）
     const task = historyTasks.value.find(t => t.id === taskId)
-    if (task && (task.status === 'pending' || task.status === 'deploying') && !logTimer) {
+    if (task && (task.status === 'pending' || task.status === 'deploying')) {
+      if (logTimer) {
+        clearInterval(logTimer)
+      }
       console.warn('WS disconnected, falling back to HTTP polling')
       logTimer = window.setInterval(() => {
         fetchTaskLog(taskId)
@@ -899,31 +1006,33 @@ const triggerRollback = (task: Task) => {
 const showDiff = async (task: Task) => {
   if (loadingDiff.value) return  // 防重复点击
   diffText.value = ''
+  selectedDiffFile.value = ''
   parsedDiffFiles.value = []
-  activeDiffTab.value = 'files' // 默认切到文件列表 tab
+  currentDiffTaskId.value = task.id
+  activeTask.value = task
+  if (task.target_type !== 'commit') {
+    currentDiffType.value = 'git_log'
+  } else {
+    currentDiffType.value = 'live'
+  }
   diffTaskInfo.value = (task.commit_id?.substring(0, 8) || '') + ' · ' + (task.release_name || '')
   loadingDiff.value = true
   diffVisible.value = true   // 立刻弹框，骨架屏先显示
   try {
     const res = await axios.get(`/api/tasks/${task.id}/diff`)
     
-    // 获取返回的 diff，新版会返回 {"diff": "...", "files": "..."}
-    // 兼容旧版的纯文本格式
-    let rawDiff = ''
     let rawFiles = ''
-    if (res.data && typeof res.data === 'object' && res.data.diff !== undefined) {
-      rawDiff = res.data.diff
+    if (res.data && typeof res.data === 'object' && res.data.files !== undefined) {
       rawFiles = res.data.files || ''
     } else {
-      rawDiff = res.data || ''
+      rawFiles = ''
     }
-
-    diffText.value = rawDiff || '两次提交内容相同，无代码变更'
 
     // 解析变更文件列表
     if (rawFiles) {
       const lines = rawFiles.split('\n')
       const files: any[] = []
+      const filePaths: string[] = []
       lines.forEach(line => {
         line = line.trim()
         if (!line) return
@@ -935,16 +1044,37 @@ const showDiff = async (task: Task) => {
           if (status === 'A') statusText = '新增'
           if (status === 'D') statusText = '删除'
           files.push({ status, statusText, path })
+          filePaths.push(path)
         } else {
           files.push({ status: 'M', statusText: '变更', path: line })
+          filePaths.push(line)
         }
       })
+      // @Ref: docs/sps/plans/20260530_fix_file_tree_rendering_plan.md | @Date: 2026-05-30
       parsedDiffFiles.value = files
+      rawFilesList.value = filePaths
+      fileTreeData.value = buildTree(filePaths)
+      defaultCheckedKeys.value = [...filePaths]
+
+      if (filePaths.length > 0) {
+        nextTick(async () => {
+          const firstFile = filePaths[0]
+          selectedDiffFile.value = firstFile
+          await loadSingleFileDiff(firstFile)
+          if (fileTreeRef.value) {
+            fileTreeRef.value.setCurrentKey(firstFile)
+          }
+        })
+      }
     } else {
+      // @Ref: docs/sps/plans/20260530_fix_file_tree_rendering_plan.md | @Date: 2026-05-30
       parsedDiffFiles.value = [{ status: '?', statusText: '无数据', path: '暂无变更文件解析数据' }]
+      rawFilesList.value = []
+      fileTreeData.value = [{ label: '暂无变更文件解析数据', path: '暂无变更文件解析数据' }]
+      defaultCheckedKeys.value = []
     }
   } catch (err) {
-    diffText.value = '获取 diff 失败，请稍后重试'
+    ElMessage.error('获取变更文件列表失败')
   } finally {
     loadingDiff.value = false
   }
@@ -1522,5 +1652,52 @@ const handleSystemPrune = () => {
     opacity: 0.35;
   }
 }
+
+.diff-split-layout {
+  display: flex;
+  height: calc(100vh - 180px);
+  gap: 16px;
+}
+
+.diff-left-sidebar {
+  width: 320px;
+  flex-shrink: 0;
+  background: #0d1117;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 10px;
+  overflow-y: auto;
+}
+
+.diff-right-content {
+  flex: 1;
+  background: #0d1117;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 16px;
+  position: relative;
+  overflow: hidden;
+}
+
+.diff-empty-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: #8b949e;
+  font-size: 14px;
+}
+
+.diff-empty-placeholder p {
+  margin-top: 12px;
+}
+
+/* 激活选中的行高亮 */
+:deep(.el-table .row-active-selected td.el-table__cell) {
+  background-color: rgba(0, 180, 216, 0.15) !important;
+  border-left: 3px solid #00b4d8;
+}
 </style>
+
 
