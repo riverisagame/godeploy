@@ -139,6 +139,10 @@ function handleFileClick(node: any) {
   }
 }
 
+watch(currentDiffType, () => {
+  if (selectedFile.value) loadFileDiff(selectedFile.value)
+})
+
 watch(localVisible, async (visible) => {
   if (!visible || !props.projectId) return
   loadingDiff.value = true
@@ -169,9 +173,9 @@ function handleClose() {
 </script>
 
 <style scoped>
-.diff-split-layout { display:flex; gap:16px; height:calc(100vh - 200px) }
-.diff-left-sidebar { width:240px; flex-shrink:0; background:#0d1117; border:1px solid #30363d; border-radius:8px; padding:12px }
-.diff-right-content { flex:1; background:#0d1117; border:1px solid #30363d; border-radius:8px; overflow:hidden }
+.diff-split-layout { display:flex; gap:16px; height:calc(100vh - 200px); background:#0a0e13 }
+.diff-left-sidebar { width:240px; flex-shrink:0; background:#0d1117; border:1px solid #21262d; border-radius:8px; padding:12px }
+.diff-right-content { flex:1; background:#0d1117; border:1px solid #21262d; border-radius:8px; overflow:hidden }
 .diff-empty-placeholder { display:flex; flex-direction:column; align-items:center; justify-content:center; height:100%; color:#484f58; gap:12px }
 .diff-loading-skeleton { padding:20px }
 .skeleton-bar { height:16px; background:rgba(48,54,61,0.5); border-radius:4px; margin-bottom:12px }
@@ -179,10 +183,41 @@ function handleClose() {
 .skeleton-bar.medium { width:65% }
 .skeleton-bar.narrow { width:40% }
 
-.dark-diff :deep(.d2h-wrapper) { color:#cdd9e5 }
-.dark-diff :deep(.d2h-file-header) { background:#161b22; border-bottom:1px solid #30363d }
+.dark-diff :deep(.d2h-wrapper) { color:#c9d1d9; background:#0d1117 }
+.dark-diff :deep(.d2h-file-header) { background:#161b22; border-bottom:1px solid #30363d; color:#8b949e }
+.dark-diff :deep(.d2h-file-stats) { background:#161b22; color:#8b949e }
+.dark-diff :deep(.d2h-lines-added) { color:#3fb950 }
+.dark-diff :deep(.d2h-lines-deleted) { color:#ff7b72 }
+.dark-diff :deep(.d2h-tag) { background:#161b22; border-color:#30363d; color:#8b949e }
 .dark-diff :deep(.d2h-diff-table) { background:#0d1117; border:1px solid #30363d; border-radius:6px }
-.dark-diff :deep(.d2h-ins .d2h-code-line) { background:#0f2a1e !important; color:#3fb950 !important }
+.dark-diff :deep(.d2h-diff-table td) { background:transparent }
+.dark-diff :deep(.d2h-diff-table tr) { background:#0d1117 }
+.dark-diff :deep(.d2h-diff-tbody tr:nth-child(even) td) { background:#0d1117 }
+.dark-diff :deep(.d2h-diff-tbody tr:nth-child(odd) td) { background:#0d1117 }
+.dark-diff :deep(.d2h-code-line) { color:#c9d1d9; background:#0d1117 }
+.dark-diff :deep(.d2h-code-line-ctn) { color:#c9d1d9 }
+.dark-diff :deep(.d2h-code-line-prefix) { color:#484f58 }
+.dark-diff :deep(.d2h-code-side-linenumber) { background:#161b22 !important; color:#484f58 !important; border-right:1px solid #30363d !important }
+.dark-diff :deep(.d2h-code-side-line) { color:#c9d1d9; background:#0d1117 }
+.dark-diff :deep(.d2h-emptyplaceholder) { background:#161b22; border-color:#30363d }
+.dark-diff :deep(.d2h-ins .d2h-code-line) { background:#0c2d1b !important; color:#3fb950 !important }
+.dark-diff :deep(.d2h-ins .d2h-code-side-line) { background:#0c2d1b !important }
+.dark-diff :deep(.d2h-ins .d2h-code-side-linenumber) { background:#133a22 !important; color:#3fb950 !important; border-right:1px solid #1a7f37 !important }
+.dark-diff :deep(.d2h-ins .d2h-code-line-prefix) { color:#3fb950 }
 .dark-diff :deep(.d2h-del .d2h-code-line) { background:#2d1010 !important; color:#ff7b72 !important }
+.dark-diff :deep(.d2h-del .d2h-code-side-line) { background:#2d1010 !important }
+.dark-diff :deep(.d2h-del .d2h-code-side-linenumber) { background:#3d1515 !important; color:#ff7b72 !important; border-right:1px solid #da3633 !important }
+.dark-diff :deep(.d2h-del .d2h-code-line-prefix) { color:#ff7b72 }
+.dark-diff :deep(.d2h-cntx .d2h-code-line) { color:#c9d1d9 }
 .dark-diff :deep(.d2h-code-linenumber) { background:#161b22 !important; color:#484f58 !important; border-right:1px solid #30363d !important }
+.dark-diff :deep(.d2h-code-linenumber-content) { color:#484f58 }
+.dark-diff :deep(.d2h-file-wrapper) { border-color:#30363d; background:#0d1117; border-radius:8px; margin-bottom:12px }
+.dark-diff :deep(.d2h-file-list) { background:#0d1117 }
+.dark-diff :deep(.d2h-file-list-header) { background:#161b22; border-color:#30363d }
+.dark-diff :deep(.d2h-file-list-line) { color:#c9d1d9; border-color:#30363d }
+.dark-diff :deep(.d2h-file-list-line.active) { background:#1f2937 }
+.dark-diff :deep(.d2h-icon) { fill:#8b949e }
+.dark-diff :deep(code) { color:#c9d1d9; background:transparent }
+.dark-diff :deep(td.d2h-info) { background:#0d1117 !important; color:#8b949e }
+.dark-diff :deep(.d2h-code-line del), .dark-diff :deep(.d2h-code-line ins) { background:transparent }
 </style>

@@ -159,6 +159,12 @@
 </template>
 
 <script setup lang="ts">
+import ProjectSidebar from '../components/ProjectSidebar.vue'
+import DeployForm from '../components/DeployForm.vue'
+import DeployHistoryTable from '../components/DeployHistoryTable.vue'
+import DiffDialog from '../components/DiffDialog.vue'
+import LogTerminal from '../components/LogTerminal.vue'
+import UserSettingsDialog from '../components/UserSettingsDialog.vue'
 import { ref, onMounted, reactive, nextTick, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
@@ -541,6 +547,10 @@ const fetchHistory = async (projectId: string, envId: string) => {
 const triggerDeploy = async (env: Environment) => {
   if (!selectedProject.value || !deployForm.branch) {
     ElMessage.warning('请选择项目和上线版本')
+    return
+  }
+  if (!deployForm.description.trim()) {
+    ElMessage.warning('请输入发布备注/说明')
     return
   }
   deployState.phase = 'confirming'

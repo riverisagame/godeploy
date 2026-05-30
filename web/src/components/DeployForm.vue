@@ -1,7 +1,7 @@
 <template>
   <div class="section-card deploy-action-card">
     <div class="card-header">触发部署</div>
-    <el-form :model="{ targetType, branch, description }" label-position="top">
+    <el-form label-position="top">
       <el-form-item label="发布目标类型">
         <el-radio-group :model-value="targetType" @update:model-value="$emit('update:targetType', $event)" size="small">
           <el-radio-button value="branch">分支</el-radio-button>
@@ -17,7 +17,7 @@
           </el-option>
         </el-select>
       </el-form-item>
-      <div v-if="deployForm.targetType === 'commit'" class="commit-filters" style="margin-bottom:18px">
+      <div v-if="targetType === 'commit'" class="commit-filters" style="margin-bottom:18px">
         <el-row :gutter="10">
           <el-col :span="6"><el-select v-model="commitFilters.ref" placeholder="分支/Tag" size="small" clearable filterable style="width:100%"><el-option v-for="item in refsList" :key="item.name" :label="item.name" :value="item.name" /></el-select></el-col>
           <el-col :span="6"><el-input v-model="commitFilters.keyword" placeholder="搜 Message" size="small" clearable /></el-col>
@@ -25,7 +25,7 @@
           <el-col :span="6"><el-input v-model="commitFilters.file" placeholder="搜文件" size="small" clearable /></el-col>
         </el-row>
         <el-form-item label="选择 Commit" style="margin-top:10px">
-          <el-select v-model="deployForm.branch" filterable remote :remote-method="onSearchCommits" :loading="loadingCommits" placeholder="选择 Commit..." style="width:100%">
+          <el-select :model-value="branch" @update:model-value="$emit('update:branch', $event)" filterable remote :remote-method="onSearchCommits" :loading="loadingCommits" placeholder="选择 Commit..." style="width:100%">
             <el-option v-for="item in commitsList" :key="item.hash" :label="item.message" :value="item.hash">
               <div style="display:flex;justify-content:space-between;align-items:center">
                 <span style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ item.message }}</span>
@@ -35,8 +35,8 @@
           </el-select>
         </el-form-item>
       </div>
-      <el-form-item label="发布备注/说明" style="margin-top:15px">
-        <el-input v-model="deployForm.description" placeholder="请输入本次上线的备注说明" type="textarea" :rows="2" />
+      <el-form-item label="发布备注/说明" required style="margin-top:15px">
+        <el-input :model-value="description" @update:model-value="$emit('update:description', $event)" placeholder="请输入本次上线的备注说明" type="textarea" :rows="2" />
       </el-form-item>
       <div style="display:flex;gap:10px;margin-top:20px">
         <el-button type="primary" size="large" class="trigger-deploy-btn" @click="$emit('deploy')" style="flex:1">

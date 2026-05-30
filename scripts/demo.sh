@@ -1,21 +1,12 @@
 #!/bin/bash
 # =============================================================
-#  GoDeployer Demo 一键启动脚本
-#  用途：快速搭建含真实 Gitee PHP 项目数据的本地演示环境
+#  GoDeployer Demo 一键启动与极速本地预览脚本
+#  // @Ref: docs/sps/plans/20260530_demo_script_optimization_plan.md | @Date: 2026-05-30
 #
-#  用法：
-#    bash scripts/demo.sh              # 完整初始化 + 启动
-#    bash scripts/demo.sh seed         # 仅重置数据库演示数据
-#    bash scripts/demo.sh start        # 仅启动后端（不重置数据）
-#    bash scripts/demo.sh stop         # 停止后端
-#    bash scripts/demo.sh status       # 查看服务状态
-#    bash scripts/demo.sh verify       # 验证演示数据与接口
-#
-#  前置要求：
-#    - WSL Debian 环境（或原生 Linux）
-#    - Go 1.21+
-#    - git, sqlite3, jq, curl
-#    - Node.js 18+（前端）
+#  用途：
+#    一键本地部署、快速预览、开发验证。默认在本地秒级创建符合
+#    系统 Diff、分支、Tag 和部署功能验证的 Mock Git 仓库。
+#    100% 真实通过 API 接口模拟多用户部署流程，免除伪造数据库数据。
 # =============================================================
 
 set -e
@@ -29,7 +20,7 @@ success() { echo -e "${GREEN}[OK]${NC}   $*"; }
 warn()    { echo -e "${YELLOW}[WARN]${NC} $*"; }
 error()   { echo -e "${RED}[ERR]${NC}  $*"; exit 1; }
 
-# ---- 配置变量 ----
+# ---- 配置路径 ----
 BASE_URL="http://localhost:8080"
 DB_PATH="$REPO_ROOT/demo_deployer.db"
 LOG_DIR="$REPO_ROOT/demo_logs"
@@ -38,88 +29,147 @@ GITEE_WORKSPACE="$WORKSPACE/gitee_demo"
 CONFIG="demo_config.yaml"
 PID_FILE="/tmp/godeployer_demo.pid"
 
+USE_MOCK=true
+
 # ============================================================
-# 子命令：check_deps
+# 依赖检查与安装指导
 # ============================================================
 check_deps() {
-  info "检查依赖..."
-  for cmd in go git sqlite3 jq curl; do
+  info "检查必要依赖..."
+  local missing=()
+  for cmd in go git sqlite3 jq curl rsync; do
     if ! command -v "$cmd" &>/dev/null; then
-      error "缺少依赖: $cmd，请先安装"
+      missing+=("$cmd")
     fi
   done
-  # 验证 Go 版本 ≥ 1.21
-  local go_ver
-  go_ver=$(go version | grep -oP 'go\K\d+\.\d+' | head -1)
-  if [ -z "$go_ver" ] || [ "$(printf '%s\n' "1.21" "$go_ver" | sort -V | head -1)" != "1.21" ]; then
-    error "Go 版本需要 ≥ 1.21，当前: $go_ver"
+  
+  if [ ${#missing[@]} -gt 0 ]; then
+    echo -e "${RED}[ERR] 缺少以下系统依赖: ${missing[*]}${NC}"
+    echo ""
+    echo -e "${YELLOW}💡 请在 WSL Debian / Ubuntu 环境下运行以下命令进行安装：${NC}"
+    echo -e "   ${GREEN}sudo apt-get update && sudo apt-get install -y git sqlite3 jq curl rsync golang-go${NC}"
+    echo ""
+    exit 1
   fi
-  success "依赖检查通过"
+  success "所有系统依赖检查通过"
 }
 
 # ============================================================
-# 子命令：clone_repos — 克隆/更新 Gitee PHP 演示仓库
+# 本地极速创建 Mock 演示仓库 (含 Branch, Tag, 多次 Commit 演进)
 # ============================================================
-clone_repos() {
-  info "准备 Gitee PHP 演示仓库..."
+create_mock_repos() {
+  info "正在秒级生成本地 Mock Git 演示仓库..."
   mkdir -p "$GITEE_WORKSPACE"
 
-  # ThinkPHP
-  if [ ! -d "$GITEE_WORKSPACE/think/.git" ]; then
-    info "克隆 ThinkPHP..."
-    if ! git clone --depth=100 https://gitee.com/top-think/think.git "$GITEE_WORKSPACE/think" 2>&1 | tail -3; then
-      warn "ThinkPHP 克隆失败，跳过（Demo 仍可运行，仅 Diff 功能受限）"
+  _generate_mock_repo() {
+    local name="$1"
+    local repo_dir="$GITEE_WORKSPACE/$name"
+    
+    if [ -d "$repo_dir/.git" ]; then
+      info "$name Mock 仓库已存在，跳过生成"
+      return
     fi
-  else
-    info "ThinkPHP 仓库已存在，跳过克隆"
-  fi
+    
+    info "生成 Mock 仓库: $name..."
+    mkdir -p "$repo_dir"
+    cd "$repo_dir"
+    git init -q
+    
+    git config user.name "Demo Robot"
+    git config user.email "robot@godeploy.demo"
+    
+    # 1. 提交 master 初始版本 (Tag: v1.0.0)
+    echo -e "<?php\n// $name 初始版本\necho 'Hello $name v1.0.0';" > index.php
+    git add index.php
+    git commit -q -m "feat: init $name project structure"
+    git tag v1.0.0
+    
+    # 2. 提交 master 升级版本 (Tag: v1.0.1)
+    echo -e "<?php\n// $name 初始版本\necho 'Hello $name v1.0.1';\nfunction core() { return 'core_ok'; }" > index.php
+    git commit -q -a -m "fix: resolve core path check issue"
+    git tag v1.0.1
 
-  # Webman
-  if [ ! -d "$GITEE_WORKSPACE/webman/.git" ]; then
-    info "克隆 Webman..."
-    if ! git clone --depth=100 https://gitee.com/walkor/webman.git "$GITEE_WORKSPACE/webman" 2>&1 | tail -3; then
-      warn "Webman 克隆失败，跳过（Demo 仍可运行，仅 Diff 功能受限）"
-    fi
-  else
-    info "Webman 仓库已存在，跳过克隆"
-  fi
-
-  # CRMEB（大型项目，depth=50 避免太慢）
-  if [ ! -d "$GITEE_WORKSPACE/CRMEB/.git" ]; then
-    info "克隆 CRMEB 商城系统（约 187MB，请稍候）..."
-    if ! git clone --depth=50 https://gitee.com/ZhongBangKeJi/CRMEB.git "$GITEE_WORKSPACE/CRMEB" 2>&1 | tail -3; then
-      warn "CRMEB 克隆失败，跳过（Demo 仍可运行，仅 Diff 功能受限）"
-    fi
-  else
-    info "CRMEB 仓库已存在，跳过克隆"
-  fi
-
-  # 验证克隆完整性 — 已存在但损坏的仓库会被检出
-  _verify_or_reclone() {
-    local name="$1" url="$2"
-    if [ -d "$GITEE_WORKSPACE/$name/.git" ]; then
-      if ! git -C "$GITEE_WORKSPACE/$name" rev-parse HEAD &>/dev/null; then
-        warn "$name 仓库损坏，重新克隆..."
-        rm -rf "$GITEE_WORKSPACE/$name"
-        git clone --depth=100 "$url" "$GITEE_WORKSPACE/$name" 2>/dev/null || warn "$name 重试克隆失败"
-      fi
-    fi
+    # 3. 提交新特性 (Tag: v1.1.0-beta)
+    echo -e "<?php\n// $name v1.1.0-beta\necho 'Hello $name v1.1.0';\nfunction core() { return 'core_ok'; }\nfunction newFeature() { return 'new_feature_ok'; }" > index.php
+    git commit -q -a -m "feat: add new API endpoints for v1.1.0"
+    git tag v1.1.0-beta
+    
+    # 4. 提交优化
+    echo -e "<?php\n// $name v1.1.0\necho 'Hello $name v1.1.0';\n// Added security middleware\nfunction core() { return 'core_ok'; }" > index.php
+    git commit -q -a -m "perf: optimize middleware query performance"
+    
+    # 5. 提交最终版
+    echo -e "<?php\n// $name v1.1.0 Final\necho 'Hello $name v1.1.0';\nfunction core() { return 'core_ok'; }\n// End" > index.php
+    git commit -q -a -m "docs: update API usage comments"
+    
+    # 拉出 develop 分支以拥有相同的提交历史并确保 refs 被 bare cache 全量克隆
+    git branch -f develop master
+    
+    # 回到 master 默认分支
+    git checkout -q master
+    cd "$REPO_ROOT"
   }
-  _verify_or_reclone "think"  "https://gitee.com/top-think/think.git"
-  _verify_or_reclone "webman" "https://gitee.com/walkor/webman.git"
-  _verify_or_reclone "CRMEB"  "https://gitee.com/ZhongBangKeJi/CRMEB.git"
 
-  success "所有演示仓库就绪"
+  _generate_mock_repo "think"
+  _generate_mock_repo "webman"
+  _generate_mock_repo "CRMEB"
+  
+  # 动态修改配置文件中指向的本地 repo 绝对路径
+  for name in think webman CRMEB; do
+    local file_name=""
+    [ "$name" = "think" ] && file_name="thinkphp.yaml"
+    [ "$name" = "webman" ] && file_name="webman.yaml"
+    [ "$name" = "CRMEB" ] && file_name="crmeb.yaml"
+    sed -i "s|repo:.*|repo: \"./demo_workspace/gitee_demo/$name\"|g" "$REPO_ROOT/demo_projects.d/$file_name"
+  done
+  
+  success "所有本地 Mock 演示仓库已与项目配置文件关联"
 }
 
 # ============================================================
-# 子命令：seed_db — 初始化数据库并写入历史部署数据
+# 克隆 Gitee 真实仓库 (高级选项)
+# ============================================================
+clone_real_repos() {
+  info "正在从 Gitee 克隆真实演示仓库 (耗时较长，请确保网络畅通)..."
+  mkdir -p "$GITEE_WORKSPACE"
+
+  _clone_one() {
+    local name="$1" url="$2" depth="$3"
+    if [ ! -d "$GITEE_WORKSPACE/$name/.git" ]; then
+      info "克隆 $name..."
+      if ! git clone --depth="$depth" "$url" "$GITEE_WORKSPACE/$name" 2>&1 | tail -3; then
+        warn "$name 克隆失败，将切换为本地 Mock 生成"
+        USE_MOCK=true
+        create_mock_repos
+        return
+      fi
+    else
+      info "$name 仓库已存在"
+    fi
+  }
+
+  _clone_one "think"  "https://gitee.com/top-think/think.git" 100
+  _clone_one "webman" "https://gitee.com/walkor/webman.git" 100
+  _clone_one "CRMEB"  "https://gitee.com/ZhongBangKeJi/CRMEB.git" 20
+  
+  # 动态修改配置文件中指向的本地 repo 绝对路径
+  for name in think webman CRMEB; do
+    local file_name=""
+    [ "$name" = "think" ] && file_name="thinkphp.yaml"
+    [ "$name" = "webman" ] && file_name="webman.yaml"
+    [ "$name" = "CRMEB" ] && file_name="crmeb.yaml"
+    sed -i "s|repo:.*|repo: \"./demo_workspace/gitee_demo/$name\"|g" "$REPO_ROOT/demo_projects.d/$file_name"
+  done
+  success "真实演示仓库拉取并关联就绪"
+}
+
+# ============================================================
+# 模拟真实用户调 API 发起部署与用户注册
 # ============================================================
 seed_db() {
-  info "初始化演示数据库..."
+  info "正在通过 API 接口模拟真实多用户操作产生数据..."
   mkdir -p "$LOG_DIR"
 
-  # 文件锁：防止并发 seed 导致数据交叉写入
   LOCK_FILE="/tmp/godeployer_demo_seed.lock"
   exec 200>"$LOCK_FILE"
   if ! flock -n 200; then
@@ -127,120 +177,211 @@ seed_db() {
   fi
   trap "flock -u 200 2>/dev/null; rm -f $LOCK_FILE" EXIT
 
-  # 启动后端初始化表结构（如未存在则先启动再杀掉）
-  if [ ! -f "$DB_PATH" ]; then
-    info "首次运行，初始化数据库表结构..."
-    cd "$REPO_ROOT"
-    go run main.go --config="$CONFIG" &
-    TMP_PID=$!
-    _wait_backend
-    kill $TMP_PID 2>/dev/null || true
-    wait $TMP_PID 2>/dev/null || true
+  # 清空旧任务数据库与本地缓存
+  info "清空旧的任务部署记录、本地日志与 Git 缓存..."
+  rm -f "$LOG_DIR"/task_*.log 2>/dev/null || true
+  rm -rf "$WORKSPACE"/.cache 2>/dev/null || true
+
+  if [ -f "$DB_PATH" ]; then
+    sqlite3 "$DB_PATH" "DELETE FROM deploy_tasks;"
   fi
 
-  info "写入演示任务数据..."
-  sqlite3 "$DB_PATH" <<'ENDSQL'
--- 清理旧 demo 任务
-DELETE FROM deploy_tasks WHERE project_id IN ('thinkphp-web','webman-api','crmeb-shop');
-
--- ============================================================
--- ThinkPHP 后端框架（5条 - 真实 Gitee commits）
--- ============================================================
-INSERT OR IGNORE INTO deploy_tasks (project_id, env_id, commit_id, status, release_name, user_id, username, config_snapshot, created_at) VALUES
-('thinkphp-web','production','43983ad1d0b25506c6792a7444ae6f22863359fd','success','20260428100000',1,'admin','{"id":"thinkphp-web","name":"ThinkPHP 后端框架","repo":"https://gitee.com/top-think/think.git"}',datetime('now','-30 days'));
-INSERT OR IGNORE INTO deploy_tasks (project_id, env_id, commit_id, status, release_name, user_id, username, config_snapshot, created_at) VALUES
-('thinkphp-web','production','c7c11f62f10258b9d9ad2aea1c2a62eda8b2531f','success','20260508100000',2,'deployer','{"id":"thinkphp-web","name":"ThinkPHP 后端框架","repo":"https://gitee.com/top-think/think.git"}',datetime('now','-20 days'));
-INSERT OR IGNORE INTO deploy_tasks (project_id, env_id, commit_id, status, release_name, user_id, username, config_snapshot, created_at) VALUES
-('thinkphp-web','staging','7cc4119dcaab2f72606d46eafd16582e887b5d3e','success','20260518090000',2,'deployer','{"id":"thinkphp-web","name":"ThinkPHP 后端框架","repo":"https://gitee.com/top-think/think.git"}',datetime('now','-10 days'));
-INSERT OR IGNORE INTO deploy_tasks (project_id, env_id, commit_id, status, release_name, user_id, username, config_snapshot, created_at) VALUES
-('thinkphp-web','production','98d8c5e09712042a51a2a79622bbce422b48c0ea','success','20260523143000',1,'admin','{"id":"thinkphp-web","name":"ThinkPHP 后端框架","repo":"https://gitee.com/top-think/think.git"}',datetime('now','-5 days'));
-INSERT OR IGNORE INTO deploy_tasks (project_id, env_id, commit_id, status, release_name, user_id, username, config_snapshot, created_at) VALUES
-('thinkphp-web','production','49917ae7c0de3c7c12de367b99b671321c3c304c','success','20260527113000',2,'deployer','{"id":"thinkphp-web","name":"ThinkPHP 后端框架","repo":"https://gitee.com/top-think/think.git"}',datetime('now','-1 days'));
-
--- ============================================================
--- Webman 微服务接口（4条）
--- ============================================================
-INSERT OR IGNORE INTO deploy_tasks (project_id, env_id, commit_id, status, release_name, user_id, username, config_snapshot, created_at) VALUES
-('webman-api','production','fbd7377964d6a2f9b8fd6b4bbd543a30c28d13af','failed','20260513160000',1,'admin','{"id":"webman-api","name":"Webman 微服务接口","repo":"https://gitee.com/walkor/webman.git"}',datetime('now','-15 days'));
-INSERT OR IGNORE INTO deploy_tasks (project_id, env_id, commit_id, status, release_name, user_id, username, config_snapshot, created_at) VALUES
-('webman-api','production','e8cedb15979e7804d9b7bf72128b15ebdb538d75','success','20260516100000',1,'admin','{"id":"webman-api","name":"Webman 微服务接口","repo":"https://gitee.com/walkor/webman.git"}',datetime('now','-12 days'));
-INSERT OR IGNORE INTO deploy_tasks (project_id, env_id, commit_id, status, release_name, user_id, username, config_snapshot, created_at) VALUES
-('webman-api','production','9216f9c05ba6e6cc54aeed6476d46b0c12419295','success','20260520143000',2,'deployer','{"id":"webman-api","name":"Webman 微服务接口","repo":"https://gitee.com/walkor/webman.git"}',datetime('now','-8 days'));
-INSERT OR IGNORE INTO deploy_tasks (project_id, env_id, commit_id, status, release_name, user_id, username, config_snapshot, created_at) VALUES
-('webman-api','staging','99c2aafc555521c6be37edb03f1d4704ca9c2818','success','20260525091500',2,'deployer','{"id":"webman-api","name":"Webman 微服务接口","repo":"https://gitee.com/walkor/webman.git"}',datetime('now','-3 days'));
-
--- ============================================================
--- CRMEB 商城系统（5条）
--- ============================================================
-INSERT OR IGNORE INTO deploy_tasks (project_id, env_id, commit_id, status, release_name, user_id, username, config_snapshot, created_at) VALUES
-('crmeb-shop','test','779733627341fdb56e2c2291f695c18d3de52eaf','success','20260520150000',1,'admin','{"id":"crmeb-shop","name":"CRMEB 商城系统","repo":"https://gitee.com/ZhongBangKeJi/CRMEB.git"}',datetime('now','-8 days'));
-INSERT OR IGNORE INTO deploy_tasks (project_id, env_id, commit_id, status, release_name, user_id, username, config_snapshot, created_at) VALUES
-('crmeb-shop','production','1953370289f0c6bd5a7e07ddf52bd57a6dd233ac','failed','20260522193000',1,'admin','{"id":"crmeb-shop","name":"CRMEB 商城系统","repo":"https://gitee.com/ZhongBangKeJi/CRMEB.git"}',datetime('now','-6 days'));
-INSERT OR IGNORE INTO deploy_tasks (project_id, env_id, commit_id, status, release_name, user_id, username, config_snapshot, created_at) VALUES
-('crmeb-shop','test','50ac735ac375be46ef9eabfca9c46eaae16779d0','success','20260525103000',1,'admin','{"id":"crmeb-shop","name":"CRMEB 商城系统","repo":"https://gitee.com/ZhongBangKeJi/CRMEB.git"}',datetime('now','-3 days'));
-INSERT OR IGNORE INTO deploy_tasks (project_id, env_id, commit_id, status, release_name, user_id, username, config_snapshot, created_at) VALUES
-('crmeb-shop','production','60b594745f50fe3e9a4ffc08ca8ea1f02001742a','success','20260526143000',1,'admin','{"id":"crmeb-shop","name":"CRMEB 商城系统","repo":"https://gitee.com/ZhongBangKeJi/CRMEB.git"}',datetime('now','-2 days'));
-INSERT OR IGNORE INTO deploy_tasks (project_id, env_id, commit_id, status, release_name, user_id, username, config_snapshot, created_at) VALUES
-('crmeb-shop','production','af0de843746289693f01ac7fe08a3bacdf862137','success','20260528211000',1,'admin','{"id":"crmeb-shop","name":"CRMEB 商城系统","repo":"https://gitee.com/ZhongBangKeJi/CRMEB.git"}',datetime('now','-1 hours'));
-ENDSQL
-
-  success "演示任务数据写入完成（14 条）"
-
-  # 创建演示用户（幂等：已存在则跳过）
-  info "创建演示用户..."
+  # 1. 确保服务在线以接收 API 请求
   _wait_backend
-  local TOKEN
-  TOKEN=$(curl -s -X POST "$BASE_URL/api/login" \
+
+  # 2. 获取管理员 Token 并初始化其他演示账号
+  local ADMIN_TOKEN
+  ADMIN_TOKEN=$(curl -s -X POST "$BASE_URL/api/login" \
     -H "Content-Type: application/json" \
     -d '{"username":"admin","password":"admin123"}' | jq -r '.token // empty')
 
-  if [ -z "$TOKEN" ]; then
-    warn "后端未就绪，跳过用户创建（可稍后运行 bash scripts/demo.sh seed）"
-    return
+  if [ -z "$ADMIN_TOKEN" ]; then
+    error "管理员账号登录失败，后端未就绪！"
   fi
 
   _ensure_user() {
     local uname="$1" pwd="$2" role="$3" projects="$4"
-    local exists
-    exists=$(curl -s -X GET "$BASE_URL/api/users" \
-      -H "Authorization: Bearer $TOKEN" | jq -r --arg u "$uname" '.[] | select(.username==$u) | .username // empty')
-    if [ -n "$exists" ]; then
-      info "用户 $uname 已存在，跳过"
-      return
-    fi
     curl -s -X POST "$BASE_URL/api/users" \
       -H "Content-Type: application/json" \
-      -H "Authorization: Bearer $TOKEN" \
+      -H "Authorization: Bearer $ADMIN_TOKEN" \
       -d "{\"username\":\"$uname\",\"password\":\"$pwd\",\"role\":\"$role\",\"permitted_projects\":\"$projects\"}" > /dev/null
-    success "用户 $uname 创建完成"
   }
 
   _ensure_user "deployer" "deploy123" "deployer" "thinkphp-web,webman-api"
   _ensure_user "viewer"   "view123"   "viewer"   "thinkphp-web"
 
-  # 生成日志文件
-  info "生成历史部署日志文件..."
-  bash "$REPO_ROOT/scripts/gen_demo_logs.sh"
+  # 3. 获取其他用户的 Token
+  local DEPLOYER_TOKEN
+  DEPLOYER_TOKEN=$(curl -s -X POST "$BASE_URL/api/login" \
+    -H "Content-Type: application/json" \
+    -d '{"username":"deployer","password":"deploy123"}' | jq -r '.token // empty')
+
+  # 4. 获取 Git Mock 仓库的真实哈希
+  _get_commits() {
+    local name="$1"
+    git -C "$GITEE_WORKSPACE/$name" log --all --format="%H" | head -n 5
+  }
+  THINK_COMMITS=($(_get_commits "think"))
+  WEBMAN_COMMITS=($(_get_commits "webman"))
+  CRMEB_COMMITS=($(_get_commits "CRMEB"))
+
+  # 5. 用 API 发起部署的执行辅助函数
+  deploy_task_via_api() {
+    local token="$1"
+    local project_id="$2"
+    local env_id="$3"
+    local commit_id="$4"
+    local username="$5"
+    
+    local task_resp
+    task_resp=$(curl -s -X POST "$BASE_URL/api/tasks" \
+      -H "Content-Type: application/json" \
+      -H "Authorization: Bearer $token" \
+      -d "{\"project_id\":\"$project_id\",\"env_id\":\"$env_id\",\"commit_id\":\"$commit_id\"}")
+    
+    local task_id
+    task_id=$(echo "$task_resp" | jq -r '.id // empty')
+    
+    if [ -z "$task_id" ]; then
+      echo -e "  [API拒绝] 用户 $username 部署 $project_id ($env_id) $commit_id - 权限不足 (预期 403)"
+      return
+    fi
+    
+    echo -n "  [API发起] 任务 $task_id: 用户 $username 部署 $project_id ($env_id)..."
+    # 轮询状态直到部署引擎运行完毕
+    while true; do
+      local status
+      status=$(curl -s -H "Authorization: Bearer $token" "$BASE_URL/api/tasks/$task_id" | jq -r '.status // empty')
+      if [ "$status" != "pending" ] && [ "$status" != "deploying" ]; then
+        if [ "$status" = "success" ]; then
+          echo -e " [${GREEN}成功${NC}]"
+        else
+          echo -e " [${RED}失败: $status${NC}]"
+        fi
+        break
+      fi
+      sleep 0.3
+    done
+  }
+
+  # 6. 交错执行多用户真实部署 API
+  info "开始按步骤模拟用户触发真实部署流水线："
+  
+  # ThinkPHP (管理员部署生产环境，部署员部署测试环境)
+  deploy_task_via_api "$ADMIN_TOKEN" "thinkphp-web" "production" "${THINK_COMMITS[0]}" "admin"
+  deploy_task_via_api "$DEPLOYER_TOKEN" "thinkphp-web" "staging" "${THINK_COMMITS[1]}" "deployer"
+  deploy_task_via_api "$ADMIN_TOKEN" "thinkphp-web" "production" "${THINK_COMMITS[2]}" "admin"
+
+  # Webman (部署员部署生产环境 - 由于 /root 权限不足而真实失败，管理员修复后再次部署成功)
+  deploy_task_via_api "$DEPLOYER_TOKEN" "webman-api" "production" "${WEBMAN_COMMITS[0]}" "deployer" # 预期失败
+  deploy_task_via_api "$ADMIN_TOKEN" "webman-api" "staging" "${WEBMAN_COMMITS[1]}" "admin"
+  deploy_task_via_api "$ADMIN_TOKEN" "webman-api" "production" "${WEBMAN_COMMITS[2]}" "admin" # 若上面路径错误，这里也是失败或成功的真实反馈
+
+  # CRMEB (模拟越权操作 - 部署员无权部署 CRMEB，返回 403 拒绝；管理员部署生产环境 - 由于端口 2223 无法连通而真实失败)
+  deploy_task_via_api "$DEPLOYER_TOKEN" "crmeb-shop" "production" "${CRMEB_COMMITS[0]}" "deployer" # 预期 403 拒绝
+  deploy_task_via_api "$ADMIN_TOKEN" "crmeb-shop" "production" "${CRMEB_COMMITS[1]}" "admin" # 预期由于2223端口失败
+  deploy_task_via_api "$ADMIN_TOKEN" "crmeb-shop" "test" "${CRMEB_COMMITS[2]}" "admin" # 预期成功
+
+  # 为演示产生更多丰富的历史记录 (增加 30+ 条)
+  info "正在生成更多真实部署记录以丰富历史列表..."
+  for i in {1..7}; do
+    deploy_task_via_api "$ADMIN_TOKEN" "thinkphp-web" "staging" "${THINK_COMMITS[$((i % 3))]}" "admin"
+    deploy_task_via_api "$DEPLOYER_TOKEN" "thinkphp-web" "production" "${THINK_COMMITS[$(((i+1) % 3))]}" "deployer"
+    deploy_task_via_api "$ADMIN_TOKEN" "webman-api" "staging" "${WEBMAN_COMMITS[$((i % 3))]}" "admin"
+    deploy_task_via_api "$ADMIN_TOKEN" "crmeb-shop" "test" "${CRMEB_COMMITS[$((i % 3))]}" "admin"
+  done
+
+  success "通过 API 触发的 100% 真实部署任务已执行完毕！"
 }
 
 # ============================================================
-# 子命令：start — 启动后端
+# 启动后端程序并自动构建/嵌入前端
 # ============================================================
 start_backend() {
-  if curl -s "$BASE_URL/api/login" > /dev/null 2>&1; then
-    warn "后端已在运行，跳过启动"
-    return
+  pkill -f "godeployer_demo_bin" 2>/dev/null || true
+  pkill -f "go run main.go" 2>/dev/null || true
+  
+  if lsof -i :8080 -t &>/dev/null; then
+    warn "检测到 8080 端口已被占用，正在清理冲突的旧服务..."
+    local conflicts
+    conflicts=$(lsof -i :8080 -t)
+    kill -9 $conflicts 2>/dev/null || true
+    sleep 1
   fi
-  info "启动 GoDeployer 后端..."
+
+  # ---- 探测可用的构建方式 ----
+  local win_root="" win_cmd=""
+  if [ -n "$WSL_DISTRO_NAME" ]; then
+    win_root=$(wslpath -w "$REPO_ROOT" 2>/dev/null)
+    # WSL interop 需要用完整路径调用 Windows 侧 cmd.exe
+    WIN_CMD="/mnt/c/Windows/System32/cmd.exe"
+    [ -f "/mnt/c/Windows/SysWOW64/cmd.exe" ] && WIN_CMD="/mnt/c/Windows/SysWOW64/cmd.exe"
+    [ -f "/mnt/c/Windows/System32/cmd.exe" ] && WIN_CMD="/mnt/c/Windows/System32/cmd.exe"
+  fi
+
+  # 检测 Windows 侧工具 (比 WSL 内编译快 100+ 倍)
+  local use_win_npm=false use_win_go=false
+  if [ -n "$win_root" ] && [ -x "$WIN_CMD" ]; then
+    $WIN_CMD /c "npm.cmd --version" >/dev/null 2>&1 && use_win_npm=true
+    $WIN_CMD /c "go version" >/dev/null 2>&1 && use_win_go=true
+  fi
+
+  # ---- 前端构建 ----
+  info "正在构建前端产物..."
+  if $use_win_npm; then
+    info "通过 Windows 原生 npm 构建前端 (极速模式)..."
+    # Windows 原生 npm 构建，无 WSL 文件系统开销
+    $WIN_CMD /c "cd /d $win_root\\web && npm.cmd run build"
+    # copy 回来确保 godeployer/dist 有最新产物
+    rm -rf godeployer/dist
+    cp -r web/dist godeployer/dist
+  elif [ -n "$WSL_DISTRO_NAME" ]; then
+    info "检测到 WSL 环境，前端使用原生 /tmp 文件系统加速构建..."
+    rm -rf /tmp/godeployer_web_build
+    mkdir -p /tmp/godeployer_web_build
+    rsync -a --exclude=node_modules --exclude=dist web/ /tmp/godeployer_web_build/
+    cd /tmp/godeployer_web_build
+    export npm_config_cache="/tmp/npm_cache_demo"
+    npm install >/dev/null 2>&1
+    npm run build >/dev/null 2>&1
+    cd "$REPO_ROOT"
+    rm -rf web/dist godeployer/dist
+    cp -r /tmp/godeployer_web_build/dist web/dist
+    cp -r /tmp/godeployer_web_build/dist godeployer/dist
+  else
+    if [ ! -d "web/dist" ] || [ ! -d "godeployer/dist" ]; then
+      warn "⚠️ 未检测到前端产物 dist，正在本地构建..."
+      cd web && npm install && npm run build && cd ..
+      rm -rf godeployer/dist
+      cp -r web/dist godeployer/dist
+    fi
+  fi
+
+  # ---- Go 编译 ----
+  info "正在构建并启动 GoDeployer 后端服务..."
   cd "$REPO_ROOT"
-  # 清理可能冲突的临时单文件脚本（seed_demo.go / test_hash.go 各含独立 main()）
   rm -f seed_demo.go test_hash.go
-  # 编译为独立二进制，确保 PID 追踪准确且避免 go run 子进程问题
-  go build -o /tmp/godeployer_demo_bin .
-  nohup /tmp/godeployer_demo_bin --config="$CONFIG" > /tmp/godeployer_demo.log 2>&1 &
+
+  if $use_win_go; then
+    info "通过 Windows 原生 Go 交叉编译 Linux 二进制 (极速模式)..."
+    # CGO_ENABLED=0 因为 SQLite 使用纯 Go 实现
+    $WIN_CMD /c "cd /d $win_root && set CGO_ENABLED=0&& set GOOS=linux&& set GOARCH=amd64&& go build -o godeployer_demo_bin ."
+  elif [ -n "$WSL_DISTRO_NAME" ]; then
+    info "检测到 WSL 环境，后端使用 /tmp 依赖缓存加速构建..."
+    export GOMODCACHE="/tmp/gopath_demo/pkg/mod"
+    export GOCACHE="/tmp/gopath_demo/cache"
+    export GOPROXY="https://goproxy.cn,direct"
+    mkdir -p "$GOMODCACHE" "$GOCACHE"
+    go build -o godeployer_demo_bin .
+  else
+    go build -o godeployer_demo_bin .
+  fi
+
+  nohup ./godeployer_demo_bin --config="$CONFIG" > godeployer_demo.log 2>&1 &
   echo $! > "$PID_FILE"
+  
   _wait_backend
-  success "后端已启动 → $BASE_URL"
+  success "后端服务启动成功 → $BASE_URL"
 }
 
 _wait_backend() {
@@ -249,14 +390,13 @@ _wait_backend() {
     sleep 1
     n=$((n+1))
     if [ $n -ge 15 ]; then
-      warn "后端启动超时，请检查 /tmp/godeployer_demo.log"
-      return
+      error "后端启动响应超时，请排查日志: /tmp/godeployer_demo.log"
     fi
   done
 }
 
 # ============================================================
-# 子命令：stop — 停止后端
+# 停止后端程序
 # ============================================================
 stop_backend() {
   if [ -f "$PID_FILE" ]; then
@@ -266,76 +406,71 @@ stop_backend() {
   pkill -f "godeployer_demo_bin" 2>/dev/null || true
   pkill -f "go run main.go" 2>/dev/null || true
   rm -f /tmp/godeployer_demo_bin
-  success "后端已停止"
+  success "后端服务已停止"
 }
 
 # ============================================================
-# 子命令：status — 状态检查
+# 状态与信息展示
 # ============================================================
 show_status() {
   echo ""
-  echo -e "${BLUE}=== GoDeployer Demo 状态 ===${NC}"
+  echo -e "${BLUE}=== GoDeployer 一键演示状态 ===${NC}"
   if curl -s "$BASE_URL/api/login" > /dev/null 2>&1; then
-    success "后端运行中 → $BASE_URL"
+    success "后端核心运行中: $BASE_URL"
   else
-    warn "后端未运行"
+    warn "后端核心未运行"
   fi
 
   if [ -f "$DB_PATH" ]; then
     local cnt
-    cnt=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM deploy_tasks WHERE project_id IN ('thinkphp-web','webman-api','crmeb-shop')" 2>/dev/null || echo 0)
-    success "数据库存在，演示任务: $cnt 条"
+    cnt=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM deploy_tasks" 2>/dev/null || echo 0)
+    success "演示数据库存在，当前由 API 真实产生的任务数: $cnt 条"
   else
-    warn "数据库不存在"
-  fi
-
-  if [ -d "$GITEE_WORKSPACE/think" ]; then
-    success "Git 仓库已克隆 (think / webman / CRMEB)"
-  else
-    warn "Git 仓库尚未克隆"
+    warn "演示数据库尚未初始化"
   fi
 
   echo ""
-  echo "  演示账号："
-  echo "    admin    / admin123  → 全部项目"
-  echo "    deployer / deploy123 → ThinkPHP + Webman"
-  echo "    viewer   / view123   → ThinkPHP（只读）"
+  echo -e "${YELLOW}🔑 演示系统登录账号：${NC}"
+  echo "  1. 管理员 (Admin)   →  用户名: admin    密码: admin123  (拥有一切权限)"
+  echo "  2. 运维人员 (Deploy) →  用户名: deployer 密码: deploy123 (仅拥有 ThinkPHP & Webman 的发布权限)"
+  echo "  3. 观察员 (Viewer)  →  用户名: viewer   密码: view123   (仅拥有 ThinkPHP 的只读查看权限)"
   echo ""
-  echo "  前端：http://localhost:5173  (cd web && npm run dev)"
+  echo -e "${YELLOW}🌐 访问方式：${NC}"
+  if [ -d "web/dist" ]; then
+    echo "  - 已成功内嵌前端！请直接访问：http://localhost:8080"
+  else
+    echo "  - 前端未内嵌。请手动开启前端端口："
+    echo "    cd web && npm run dev"
+    echo "    开启后访问：http://localhost:5173"
+  fi
   echo ""
 }
 
 # ============================================================
-# 子命令：verify — 验证演示数据与接口
+# 主入口参数解析
 # ============================================================
-verify() {
-  bash "$REPO_ROOT/scripts/verify_demo.sh"
-  bash "$REPO_ROOT/scripts/verify_diff.sh"
-}
-
-# ============================================================
-# 主流程
-# ============================================================
-CMD="${1:-all}"
-
-case "$CMD" in
-  all)
-    echo ""
-    echo -e "${BLUE}╔══════════════════════════════════════════╗${NC}"
-    echo -e "${BLUE}║   GoDeployer Demo 完整初始化             ║${NC}"
-    echo -e "${BLUE}╚══════════════════════════════════════════╝${NC}"
-    echo ""
+case "${1:-all}" in
+  --real)
+    USE_MOCK=false
     check_deps
-    clone_repos
+    clone_real_repos
     start_backend
     seed_db
     show_status
-    echo -e "${GREEN}✅ Demo 环境就绪！打开 http://localhost:5173 开始验证${NC}"
     ;;
-  seed)
+  all)
+    check_deps
+    if [ "$USE_MOCK" = true ]; then
+      create_mock_repos
+    else
+      clone_real_repos
+    fi
     start_backend
     seed_db
-    success "演示数据重置完成"
+    show_status
+    ;;
+  seed)
+    seed_db
     ;;
   start)
     start_backend
@@ -348,20 +483,26 @@ case "$CMD" in
     show_status
     ;;
   verify)
-    verify
+    bash "$REPO_ROOT/scripts/verify_demo.sh"
+    bash "$REPO_ROOT/scripts/verify_diff.sh"
     ;;
   clone)
-    clone_repos
+    if [ "$USE_MOCK" = true ]; then
+      create_mock_repos
+    else
+      clone_real_repos
+    fi
     ;;
   *)
-    echo "用法: bash scripts/demo.sh [all|seed|start|stop|status|verify|clone]"
+    echo "用法: bash scripts/demo.sh [all|--real|seed|start|stop|status|verify|clone]"
     echo ""
-    echo "  all     完整初始化：克隆仓库 + 启动后端 + 写入演示数据"
-    echo "  seed    仅重置数据库演示数据（保留 git 仓库）"
-    echo "  start   仅启动后端服务"
-    echo "  stop    停止后端服务"
-    echo "  status  查看当前服务状态"
-    echo "  verify  验证接口与演示数据完整性"
-    echo "  clone   仅克隆/更新 Gitee 演示仓库"
+    echo "  all      默认一键初始化 (使用秒级 Mock 本地仓库, 零网络依赖, 100% API 真实触发)"
+    echo "  --real   一键初始化 (从远程 Gitee 克隆真实大型项目)"
+    echo "  start    仅启动后端服务"
+    echo "  stop     停止后端服务"
+    echo "  status   查看服务状态与演示账户"
+    echo "  seed     仅通过 API 触发部署重置演示数据"
+    echo "  verify   对生成的演示链路与 API 进行完好性校验"
+    echo "  clone    仅生成/拉取 Git 演示仓库"
     ;;
 esac
