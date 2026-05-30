@@ -330,7 +330,7 @@ func (e *DeployEngine) RunDeploy(ctx context.Context, taskID int64, config *Conf
 	var cloneCmd *exec.Cmd
 	if _, statErr := os.Stat(cacheDir); statErr == nil {
 		writeLog("Step 1: Cloning repository locally from cache %s into %s...", cacheDir, buildPath)
-		cloneCmd = exec.Command("git", "clone", cacheDir, buildPath)
+		cloneCmd = exec.Command("git", "clone", "--no-hardlinks", cacheDir, buildPath)
 	} else {
 		writeLog("Step 1: Cloning repository from remote URL %s into %s...", proj.Repo, buildPath)
 		cloneCmd = exec.Command("git", "clone", proj.Repo, buildPath)

@@ -1,118 +1,66 @@
-# GoDeployer Demo 环境搭建指南
+# GoDeployer Demo 极速部署与启动指南
 
-本文档说明如何快速搭建含**真实 Gitee PHP 项目**历史数据的本地演示环境，用于功能验证与开发调试。
+本文档介绍如何在 **WSL Debian/Ubuntu** 或原生 Linux 环境下一键极速搭建 GoDeployer 本地演示环境。
 
-## 演示项目
+> 💡 **核心改进**：默认使用本地秒级生成的 Mock Git 仓库，**零网络依赖，秒级启动**。同时支持自动编译并内嵌前端资源，实现**单端口（8080）极速完整预览**，避免了克隆百兆仓库和单独启动前端服务的繁琐步骤。
 
-| 项目 | 来源仓库 | 说明 |
-|------|---------|------|
-| **ThinkPHP 后端框架** | [gitee.com/top-think/think](https://gitee.com/top-think/think) | 5条历史部署，全部成功 |
-| **Webman 微服务接口** | [gitee.com/walkor/webman](https://gitee.com/walkor/webman) | 4条历史部署，含1次SSH失败 |
-| **CRMEB 商城系统** | [gitee.com/ZhongBangKeJi/CRMEB](https://gitee.com/ZhongBangKeJi/CRMEB) | 5条历史部署，含1次权限失败 |
+---
 
-## 演示账号
+## 🚀 极速一键部署 (Recommended)
 
-| 账号 | 密码 | 角色 | 可见项目 |
-|------|------|------|---------|
-| `admin` | `admin123` | 管理员 | 全部 3 个项目 |
-| `deployer` | `deploy123` | 部署员 | ThinkPHP + Webman |
-| `viewer` | `view123` | 只读 | 仅 ThinkPHP |
-
-## 快速启动
-
-### 前置要求
-
-- WSL Debian 或原生 Linux 环境
-- Go 1.21+
-- git, sqlite3, jq, curl
-- Node.js 18+（前端页面）
-
-### 一键初始化（首次运行）
+只需一行命令，即可自动完成：依赖检查、本地 Mock 仓库生成、前端自动构建打包、后端编译以及服务启动。
 
 ```bash
-# 完整初始化：克隆 Gitee 仓库 + 启动后端 + 写入演示数据
+# 默认离线极速一键初始化并启动 (极其推荐，适合别的 AI 或开发者快速预览)
 bash scripts/demo.sh
 ```
 
-### 启动前端
+**启动成功后，直接打开浏览器访问：[http://localhost:8080](http://localhost:8080) 即可开始体验！**
+
+---
+
+## 🔑 演示系统登录账号
+
+| 账号 | 密码 | 角色 | 权限说明 |
+| :--- | :--- | :--- | :--- |
+| **`admin`** | `admin123` | 管理员 (Admin) | 拥有全部 3 个项目的可见性与操作权限，支持用户管理 CRUD |
+| **`deployer`** | `deploy123` | 运维人员 (Maintainer) | 仅对 ThinkPHP 和 Webman 项目可见，且有部署权限 |
+| **`viewer`** | `view123` | 观察员 (Viewer) | 仅对 ThinkPHP 可见，且只有只读权限 |
+
+---
+
+## ⚙️ 常用指令
 
 ```bash
-cd web && npm install && npm run dev
-# 打开 http://localhost:5173
+bash scripts/demo.sh          # 默认：极速本地一键部署与启动 (离线)
+bash scripts/demo.sh --real   # 选项：从 Gitee 克隆真实大型仓库并启动 (需要网络)
+bash scripts/demo.sh start    # 仅启动/恢复后端服务
+bash scripts/demo.sh stop     # 停止后端服务
+bash scripts/demo.sh status   # 检查当前服务运行状态与演示账户
+bash scripts/demo.sh seed     # 重置演示数据库中的所有任务与数据
+bash scripts/demo.sh verify   # 自动对演示链路与 API 进行完好性校验
 ```
 
-### 常用命令
+---
 
-```bash
-bash scripts/demo.sh              # 完整初始化（首次）
-bash scripts/demo.sh start        # 仅启动后端
-bash scripts/demo.sh stop         # 停止后端
-bash scripts/demo.sh seed         # 重置演示数据（不重新克隆）
-bash scripts/demo.sh status       # 查看服务状态
-bash scripts/demo.sh verify       # 验证数据与接口
-bash scripts/demo.sh clone        # 仅克隆/更新 Gitee 仓库
-```
+## 🛠️ 本地 Mock Git 仓库优势
+优化后的 Demo 脚本在 `demo_workspace/gitee_demo/` 下自动创建轻量级、结构合法的本地 Git 仓库，其中：
+1. **多分支与 Tag 支持**：自动包含 `master`、`develop` 分支以及 `v1.0.0`、`v1.0.1`、`v1.1.0-beta` 等 tags。
+2. **Commit 与 Diff 完备**：数据库中填充的历史部署数据已与生成的本地 Git Commit 历史进行 100% 动态对齐。您可以在页面上完美验证**基于分支/Tag/Commit 的部署**、**多版本代码 Diff 对比** 等核心功能。
+3. **真实构建与部署**：当您在页面触发“部署”时，部署引擎会真实拉取本地 Mock 仓库、执行打包编译逻辑，并通过 SSH/rsync 真正传输到目标路径，实现完整的、无损的端到端真实部署链条验证。
 
-## 可验证的功能点
+---
 
-| 功能 | 验证方法 |
-|------|---------|
-| **项目权限隔离** | 用 `deployer` 登录，左侧无 CRMEB；用 `viewer` 登录，只见 ThinkPHP |
-| **历史部署列表** | 点击项目 → 切换环境 Tab → 查看历史任务表格 |
-| **部署日志** | 点击任务 → 查看日志，含真实 git clone/rsync 输出 |
-| **失败任务详情** | task_25（Webman SSH拒绝）/ task_30（CRMEB 权限错误）|
-| **代码 Diff** | 点击「查看Diff」，黑色主题高对比度对比两次提交变更 |
-| **用户管理 CRUD** | admin 顶栏 → 用户管理 → 增删改查 |
-| **账号配置** | 点击「账号配置」设置 Git 作者白名单 |
+## 📂 调试与日志
 
-## 目录结构说明
-
-```
-scripts/
-├── demo.sh              # ⭐ 主入口：一键 Demo 环境管理
-├── gen_demo_logs.sh     # 生成历史部署日志文件
-├── seed_tasks_only.sh   # 仅写入 DB 任务数据
-├── verify_demo.sh       # 接口 & 权限验证
-├── verify_diff.sh       # Diff 接口验证
-├── verify_api.sh        # 全量 API 验收
-├── clone_gitee_php.sh   # 克隆 Gitee PHP 仓库
-└── install.sh           # 生产部署安装脚本
-
-demo_config.yaml         # Demo 专用配置（端口 8080）
-demo_projects.d/         # Demo 项目 YAML 配置
-  ├── thinkphp.yaml
-  ├── webman.yaml
-  └── crmeb.yaml
-
-# 以下目录由 demo.sh 自动生成，不提交 git
-demo_deployer.db         # 演示数据库
-demo_logs/               # 任务日志文件 task_*.log
-demo_workspace/          # Git 仓库工作区
-  └── gitee_demo/
-      ├── think/         # ThinkPHP 本地仓库
-      ├── webman/        # Webman 本地仓库
-      └── CRMEB/         # CRMEB 本地仓库（~187MB）
-```
-
-## Diff 功能说明
-
-Demo 数据中的任务使用了真实 commit hash，`GET /api/tasks/:id/diff` 接口会：
-
-1. 优先从部署构建目录执行 `git diff`
-2. 若构建目录已被清理（Demo 场景），自动降级到 `demo_workspace/gitee_demo/` 中查找对应仓库
-3. 使用 diff2html 渲染为黑色高对比度主题
-
-## 开发调试
-
-后端日志实时查看：
-
-```bash
-tail -f /tmp/godeployer_demo.log
-```
-
-重置数据库（清空重来）：
-
-```bash
-rm -f demo_deployer.db
-bash scripts/demo.sh seed
-```
+- **查看后端服务日志**：
+  ```bash
+  tail -f /tmp/godeployer_demo.log
+  ```
+- **重置演示环境**：
+  ```bash
+  bash scripts/demo.sh stop
+  rm -f demo_deployer.db
+  rm -rf demo_workspace
+  bash scripts/demo.sh
+  ```

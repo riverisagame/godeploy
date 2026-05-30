@@ -1,6 +1,6 @@
 id: "thinkphp-web"
 name: "ThinkPHP 后端框架"
-repo: "https://gitee.com/top-think/think.git"
+repo: "./demo_workspace/gitee_demo/think"
 branch: "master"
 exclude:
   - ".git"
@@ -12,8 +12,8 @@ environments:
     default_branch: "develop"
     keep_releases: 3
     servers:
-      - host: "127.0.0.1"
-        port: 22
+      - host: "localhost"
+        port: 2222
         user: "dan"
         deploy_to: "/tmp/demo_deploy/thinkphp/staging"
   - id: "production"
@@ -21,7 +21,7 @@ environments:
     default_branch: "master"
     keep_releases: 5
     servers:
-      - host: "127.0.0.1"
-        port: 22
+      - host: "localhost"
+        port: 2222
         user: "dan"
         deploy_to: "/tmp/demo_deploy/thinkphp/production"

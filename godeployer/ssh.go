@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"runtime"
 	"strings"
 
 	"golang.org/x/crypto/ssh"
@@ -38,6 +39,19 @@ func (s *SSHExecutor) Close() error {
 }
 
 func (s *SSHExecutor) RunCommand(cmd string) (string, error) {
+	// @Ref: docs/sps/plans/20260530_demo_script_optimization_plan.md | @Date: 2026-05-30
+	// 针对 demo 场景的 2222 端口本地免 SSH 旁路处理
+	if (s.Server.Host == "localhost" || s.Server.Host == "127.0.0.1") && s.Server.Port == 2222 {
+		var execCmd *exec.Cmd
+		if runtime.GOOS == "windows" {
+			execCmd = exec.Command("cmd", "/C", cmd)
+		} else {
+			execCmd = exec.Command("sh", "-c", cmd)
+		}
+		output, err := execCmd.CombinedOutput()
+		return string(output), err
+	}
+
 	if s.pool == nil {
 		return "", fmt.Errorf("SSH pool is not initialized")
 	}
@@ -87,6 +101,39 @@ func (s *SSHExecutor) RunCommand(cmd string) (string, error) {
 }
 
 func (s *SSHExecutor) Rsync(local, remote string, linkDest string) error {
+	// @Ref: docs/sps/plans/20260530_demo_script_optimization_plan.md | @Date: 2026-05-30
+	// 针对 demo 场景的 2222 端口本地免 SSH 旁路处理
+	if (s.Server.Host == "localhost" || s.Server.Host == "127.0.0.1") && s.Server.Port == 2222 {
+		var args []string
+		args = append(args, "-rlptz", "--delete")
+		if linkDest != "" {
+			args = append(args, fmt.Sprintf("--link-dest=%s", linkDest))
+		}
+		for _, pattern := range s.ExcludeList {
+			trimmed := strings.TrimSpace(pattern)
+			if trimmed != "" {
+				args = append(args, fmt.Sprintf("--exclude=%s", trimmed))
+			}
+		}
+		args = append(args, local, remote)
+
+		ctx := s.Ctx
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		cmd := exec.CommandContext(ctx, "rsync", args...)
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
+		err := cmd.Run()
+		if err != nil {
+			if stderr.Len() > 0 {
+				return fmt.Errorf("local bypass rsync failed: %s: %w", stderr.String(), err)
+			}
+			return fmt.Errorf("local bypass rsync failed: %w", err)
+		}
+		return nil
+	}
+
 	// 拼接本地 rsync 命令。在 Linux/WSL/MacOS 环境下可用，在 Windows 平台需要安装并配置 rsync。
 	// --link-dest 需要传入目标机相对于 releases/new_release 目录的相对路径，或者绝对路径。
 	sshCmd := fmt.Sprintf("ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p %d -i %s", s.Server.Port, s.Server.SSHKeyPath)

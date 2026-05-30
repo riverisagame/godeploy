@@ -1,6 +1,6 @@
 id: "crmeb-shop"
 name: "CRMEB 商城系统"
-repo: "https://gitee.com/ZhongBangKeJi/CRMEB.git"
+repo: "./demo_workspace/gitee_demo/CRMEB"
 branch: "master"
 exclude:
   - ".git"
@@ -14,8 +14,8 @@ environments:
     default_branch: "master"
     keep_releases: 3
     servers:
-      - host: "127.0.0.1"
-        port: 22
+      - host: "localhost"
+        port: 2222
         user: "dan"
         deploy_to: "/tmp/demo_deploy/crmeb/test"
   - id: "production"
@@ -23,7 +23,7 @@ environments:
     default_branch: "master"
     keep_releases: 5
     servers:
-      - host: "127.0.0.1"
-        port: 22
+      - host: "localhost"
+        port: 2223
         user: "dan"
         deploy_to: "/tmp/demo_deploy/crmeb/production"

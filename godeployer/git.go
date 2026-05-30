@@ -25,12 +25,30 @@ func getCacheDir(projectID string) string {
 func EnsureRepoCache(ctx context.Context, repoURL, projectID string) error {
 	cacheDir := getCacheDir(projectID)
 
+	// 如果目录已存在，先校验其 remote origin 是否与当前请求的 repoURL 相同
+	if _, err := os.Stat(cacheDir); err == nil {
+		cmdCheck := exec.CommandContext(ctx, "git", "remote", "get-url", "origin")
+		cmdCheck.Dir = cacheDir
+		if out, err := cmdCheck.CombinedOutput(); err == nil {
+			currentRemote := strings.TrimSpace(string(out))
+			// 统一转成斜杠路径或清除首尾空白后进行对比
+			if filepath.ToSlash(currentRemote) != filepath.ToSlash(repoURL) {
+				// // @Ref: docs/sps/plans/20260530_fix_task_log_errors_plan.md | @Date: 2026-05-30
+				// URL不一致，说明项目仓库发生了更改，清除本地缓存重建
+				os.RemoveAll(cacheDir)
+			}
+		} else {
+			// 如果获取失败说明本地不是正常 bare 库，清空重建
+			os.RemoveAll(cacheDir)
+		}
+	}
+
 	// 如果目录不存在，执行 git clone --bare
 	if _, err := os.Stat(cacheDir); os.IsNotExist(err) {
 		if err := os.MkdirAll(filepath.Dir(cacheDir), 0755); err != nil {
 			return err
 		}
-		cmd := exec.CommandContext(ctx, "git", "clone", "--bare", repoURL, cacheDir)
+		cmd := exec.CommandContext(ctx, "git", "clone", "--no-hardlinks", "--bare", repoURL, cacheDir)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			return fmt.Errorf("git clone failed: %v, output: %s", err, string(out))
 		}
