@@ -204,20 +204,20 @@ const deleteUser = (row: any) => {
 <style scoped>
 .user-management-container {
   min-height: 100vh;
-  background: #f5f7fa;
+  background: #10121a;
   display: flex;
   flex-direction: column;
+  color: #c9d1d9;
 }
 
 .header {
   height: 60px;
-  background: #1a1a2e;
-  color: white;
+  background: #1a1f2c;
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 0 24px;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .logo-area {
@@ -234,7 +234,7 @@ const deleteUser = (row: any) => {
 
 .page-title {
   font-size: 16px;
-  color: #a0aec0;
+  color: #8a99ad;
   margin-left: 8px;
 }
 
@@ -255,6 +255,21 @@ const deleteUser = (row: any) => {
 
 .table-header h3 {
   margin: 0;
-  color: #2c3e50;
+  color: #ffffff;
+}
+
+:deep(.el-table) {
+  --el-table-bg-color: #161a23;
+  --el-table-tr-bg-color: #161a23;
+  --el-table-header-bg-color: #1c2128;
+  --el-table-border-color: rgba(255, 255, 255, 0.06);
+  --el-table-text-color: #c9d1d9;
+  --el-table-header-text-color: #8a99ad;
+}
+
+:deep(.el-input__wrapper) {
+  background-color: #121824;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: none;
 }
 </style>
