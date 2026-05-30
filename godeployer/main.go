@@ -1,6 +1,12 @@
 package godeployer
 
 import (
+	"deploy/godeployer/application"
+	"deploy/godeployer/domain"
+	"deploy/godeployer/infrastructure/notifier"
+	"deploy/godeployer/infrastructure/sqlite"
+	"deploy/godeployer/interfaces/api"
+
 	"context"
 	"database/sql"
 	"embed"
@@ -27,13 +33,13 @@ func GetEmbeddedAsset(path string) ([]byte, error) {
 }
 
 // BootstrapApp 提供集成化的配置加载与数据库初始化引导。
-func BootstrapApp(configPath string) (*Config, *sql.DB, error) {
+func BootstrapApp(configPath string) (*domain.Config, *sql.DB, error) {
 	config, err := LoadConfig(configPath)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to load config: %w", err)
 	}
 
-	db, err := InitDB(config.Global.SQLitePath)
+	db, err := sqlite.InitDB(config.Global.SQLitePath)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to initialize db: %w", err)
 	}
@@ -97,15 +103,15 @@ func StartServer() {
 	defer db.Close()
 
 	// 初始化事件通知总线并异步启动 (启动 10 个 Worker)
-	bus := NewEventBus()
+	bus := notifier.NewEventBus()
 	bus.StartEventConsumer(10)
 
 	// 实例化部署引擎并启动 Dispatcher (最大并发 3)
-	engine := NewDeployEngine(db, nil)
+	engine := application.NewDeployEngine(db, nil)
 	engine.StartDispatcher(3)
 
 	// 创建路由
-	r := SetupRoutes(config, db, engine)
+	r := api.SetupRoutes(config, db, engine)
 
 	// 挂载静态网页
 	SetupStaticEmbed(r)
@@ -143,7 +149,7 @@ func StartServer() {
 	}
 
 	log.Println("Server exiting")
-	
+
 	// 优雅关闭 DeployEngine，允许进行中的部署完成（最多给 30 秒宽限期）
 	log.Println("Waiting for active deployments to finish...")
 	if err := engine.Close(30 * time.Second); err != nil {

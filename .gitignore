@@ -114,8 +114,6 @@ web/*.png
 /web/playwright-report/
 
 # 额外的忽略目录
-.antigravy/
-.claude/
 .gitnexus/
 e2el/
 log/

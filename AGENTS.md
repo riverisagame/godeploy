@@ -91,7 +91,7 @@ docs/sps/         Superpowers SDD 工作流产物（plans/ decisions/ logs/）
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **godeploy** (1973 symbols, 3461 relationships, 23 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **godeploy** (2879 symbols, 5302 relationships, 90 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
@@ -129,6 +129,5 @@ This project is indexed by GitNexus as **godeploy** (1973 symbols, 3461 relation
 | Rename / extract / split / refactor | `.claude/skills/gitnexus/gitnexus-refactoring/SKILL.md` |
 | Tools, resources, schema reference | `.claude/skills/gitnexus/gitnexus-guide/SKILL.md` |
 | Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
-| Work in the Godeployer area (133 symbols) | `.claude/skills/generated/godeployer/SKILL.md` |
 
 <!-- gitnexus:end -->
