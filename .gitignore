@@ -81,6 +81,29 @@ web/*.png
 /test_clone/
 /projects.json
 /token.json
+
+# 编译二进制
+/godeployer_bin
+/godeployer_bin.exe
+
+# 所有的 demo 临时空间
+/demo_workspace/
+/godeployer/demo_workspace/
+
+# 各种截图
+*.png
+web/*.png
+
+# 编译出的测试二进制
+/deploy_temp.exe
+/godeployer_demo_bin
+/godeployer_demo_bin.exe
+
+# 临时测试文件
+/test_api.py
+/test_clone/
+/projects.json
+/token.json
 /test_mock_ssh.sh
 /web/test.cjs
 
@@ -89,3 +112,11 @@ web/*.png
 
 # 自动化测试报告
 /web/playwright-report/
+
+# 额外的忽略目录
+.antigravy/
+.claude/
+.gitnexus/
+e2el/
+log/
+venv/
