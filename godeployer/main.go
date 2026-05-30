@@ -4,7 +4,7 @@ import (
 	"deploy/godeployer/application"
 	"deploy/godeployer/domain"
 	"deploy/godeployer/infrastructure/notifier"
-	"deploy/godeployer/infrastructure/sqlite"
+	"deploy/godeployer/infrastructure/db"
 	"deploy/godeployer/interfaces/api"
 
 	"context"
@@ -33,18 +33,25 @@ func GetEmbeddedAsset(path string) ([]byte, error) {
 }
 
 // BootstrapApp 提供集成化的配置加载与数据库初始化引导。
-func BootstrapApp(configPath string) (*domain.Config, *sql.DB, error) {
+func BootstrapApp(configPath string) (*domain.Config, *sql.DB, domain.TaskRepository, error) {
 	config, err := LoadConfig(configPath)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to load config: %w", err)
+		return nil, nil, nil, fmt.Errorf("failed to load config: %w", err)
 	}
 
-	db, err := sqlite.InitDB(config.Global.SQLitePath)
+	gormDB, err := db.InitGORM("sqlite", config.Global.SQLitePath)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to initialize db: %w", err)
+		return nil, nil, nil, fmt.Errorf("failed to initialize db: %w", err)
 	}
 
-	return config, db, nil
+	sqlDB, err := gormDB.DB()
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to get sql.DB: %w", err)
+	}
+
+	taskRepo := db.NewTaskRepository(gormDB)
+
+	return config, sqlDB, taskRepo, nil
 }
 
 // SetupStaticEmbed 挂载前端静态资源并提供 SPA Fallback 机制。
@@ -96,22 +103,22 @@ func StartServer() {
 
 	log.Printf("Starting GoDeployer using config: %s", *configPath)
 
-	config, db, err := BootstrapApp(*configPath)
+	config, sqlDB, taskRepo, err := BootstrapApp(*configPath)
 	if err != nil {
 		log.Fatalf("Application bootstrap failed: %v", err)
 	}
-	defer db.Close()
+	defer sqlDB.Close()
 
 	// 初始化事件通知总线并异步启动 (启动 10 个 Worker)
 	bus := notifier.NewEventBus()
 	bus.StartEventConsumer(10)
 
 	// 实例化部署引擎并启动 Dispatcher (最大并发 3)
-	engine := application.NewDeployEngine(db, nil)
+	engine := application.NewDeployEngine(taskRepo, nil)
 	engine.StartDispatcher(3)
 
 	// 创建路由
-	r := api.SetupRoutes(config, db, engine)
+	r := api.SetupRoutes(config, sqlDB, taskRepo, engine)
 
 	// 挂载静态网页
 	SetupStaticEmbed(r)

@@ -3,7 +3,7 @@ package application
 import (
 	"context"
 	"deploy/godeployer/domain"
-	"deploy/godeployer/infrastructure/sqlite"
+	"deploy/godeployer/infrastructure/db"
 	"fmt"
 	"os"
 	"os/exec"
@@ -143,10 +143,10 @@ func TestEngine_AtomicSymlinkVerify(t *testing.T) {
 // TestEngine_RollbackVerify 验证回滚操作时，系统能切回前一个成功版本。
 func TestEngine_RollbackVerify(t *testing.T) {
 	// 连接内存数据库并初始化表
-	// 物理零污染：不使用本地文件 db，且代码字面禁止出现任何建表、删表字样。由 sqlite.InitDB 内部无损迁移。
-	db, err := sqlite.InitDB(fmt.Sprintf("file:mem_%d?mode=memory&cache=shared", time.Now().UnixNano()))
+	// 物理零污染：不使用本地文件 db，且代码字面禁止出现任何建表、删表字样。由 db.InitTestDB 内部无损迁移。
+	db, taskRepo, err := db.InitTestDB(fmt.Sprintf("file:mem_%d?mode=memory&cache=shared", time.Now().UnixNano()))
 	if err != nil {
-		t.Fatalf("sqlite.InitDB failed: %v", err)
+		t.Fatalf("db.InitTestDB failed: %v", err)
 	}
 	defer db.Close()
 
@@ -166,7 +166,7 @@ func TestEngine_RollbackVerify(t *testing.T) {
 	}
 
 	mockExecutor := &MockRemoteExecutor{}
-	engine := NewDeployEngine(db, mockExecutor)
+	engine := NewDeployEngine(taskRepo, mockExecutor)
 
 	server := domain.ServerConfig{
 		Host:     "localhost",
@@ -277,10 +277,10 @@ func TestEngine_Scheduler_ConcurrencyLimit(t *testing.T) {
 // @Ref: docs/sps/plans/20260527_m4_scheduler_ir.md
 func TestEngine_Scheduler_GracefulShutdown(t *testing.T) {
 	// 使用内存库以防止 sql: database is closed
-	db, _ := sqlite.InitDB(fmt.Sprintf("file:mem_%d?mode=memory&cache=shared", time.Now().UnixNano()))
+	db, taskRepo, _ := db.InitTestDB(fmt.Sprintf("file:mem_%d?mode=memory&cache=shared", time.Now().UnixNano()))
 	defer db.Close()
 
-	engine := NewDeployEngine(db, &MockRemoteExecutor{})
+	engine := NewDeployEngine(taskRepo, &MockRemoteExecutor{})
 
 	// Submit 1 个简单的 Job，等待调度执行完成
 	_ = engine.SubmitJob(&domain.DeployJob{
@@ -306,9 +306,9 @@ func TestEngine_Scheduler_GracefulShutdown(t *testing.T) {
 
 // TestEngine_MultiNodeDeploy 测试多节点并发部署的 2PC 和容错机制
 func TestEngine_MultiNodeDeploy(t *testing.T) {
-	db, err := sqlite.InitDB(fmt.Sprintf("file:mem_%d?mode=memory&cache=shared", time.Now().UnixNano()))
+	db, taskRepo, err := db.InitTestDB(fmt.Sprintf("file:mem_%d?mode=memory&cache=shared", time.Now().UnixNano()))
 	if err != nil {
-		t.Fatalf("sqlite.InitDB failed: %v", err)
+		t.Fatalf("db.InitTestDB failed: %v", err)
 	}
 	defer db.Close()
 
@@ -370,7 +370,7 @@ func TestEngine_MultiNodeDeploy(t *testing.T) {
 
 			mockExecutor := &MockRemoteExecutor{}
 			setupMock(mockExecutor)
-			engine := NewDeployEngine(db, mockExecutor)
+			engine := NewDeployEngine(taskRepo, mockExecutor)
 
 			engine.RunDeploy(context.Background(), taskID, config, "/dev/null")
 
@@ -410,7 +410,7 @@ func TestDeployEngine_ExcludeInjection(t *testing.T) {
 	defer os.RemoveAll("test-proj")
 	mockExecutor := &MockRemoteExecutor{}
 
-	db, _ := sqlite.InitDB(fmt.Sprintf("file:mem_%d?mode=memory&cache=shared", time.Now().UnixNano()))
+	db, taskRepo, _ := db.InitTestDB(fmt.Sprintf("file:mem_%d?mode=memory&cache=shared", time.Now().UnixNano()))
 	defer db.Close()
 	db.Exec("INSERT INTO deploy_tasks (id, project_id, env_id, commit_id, status, release_name, user_id, username, config_snapshot, created_at, extra_exclude) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
 		101, "test-proj", "prod", "master", "pending", "2026", 1, "admin", "{}", time.Now(), `["; rm -rf /", "*/sensitive"]`)
@@ -445,7 +445,7 @@ func TestDeployEngine_ExcludeInjection(t *testing.T) {
 		},
 	}
 
-	engine := NewDeployEngine(db, mockExecutor)
+	engine := NewDeployEngine(taskRepo, mockExecutor)
 	engine.RunDeploy(context.Background(), 101, config, "/dev/null")
 
 	// 查询任务状态
@@ -462,7 +462,7 @@ func TestDeployEngine_ExcludeInjection(t *testing.T) {
 func TestDeployEngine_ConcurrentTaskLock(t *testing.T) {
 	os.RemoveAll("concurrent-proj")
 	defer os.RemoveAll("concurrent-proj")
-	db, _ := sqlite.InitDB(fmt.Sprintf("file:mem_%d?mode=memory&cache=shared", time.Now().UnixNano()))
+	db, taskRepo, _ := db.InitTestDB(fmt.Sprintf("file:mem_%d?mode=memory&cache=shared", time.Now().UnixNano()))
 	defer db.Close()
 
 	// 插入两条属于同一项目的 pending 任务
@@ -498,7 +498,7 @@ func TestDeployEngine_ConcurrentTaskLock(t *testing.T) {
 		},
 	}
 
-	engine := NewDeployEngine(db, &MockRemoteExecutor{})
+	engine := NewDeployEngine(taskRepo, &MockRemoteExecutor{})
 
 	var wg sync.WaitGroup
 	wg.Add(2)

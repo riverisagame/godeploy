@@ -33,7 +33,7 @@ project_config_dir: ""
 	}
 
 	// 启动应用引导逻辑 (在 RED 阶段尚未实现，预计编译或调用失败)
-	config, db, err := godeployer.BootstrapApp(configPath)
+	config, db, _, err := godeployer.BootstrapApp(configPath)
 	if err != nil {
 		t.Fatalf("BootstrapApp failed: %v", err)
 	}

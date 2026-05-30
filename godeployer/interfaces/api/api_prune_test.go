@@ -3,7 +3,7 @@ package api
 import (
 	"deploy/godeployer/application"
 	"deploy/godeployer/domain"
-	"deploy/godeployer/infrastructure/sqlite"
+	"deploy/godeployer/infrastructure/db"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -47,7 +47,7 @@ func TestAPI_SystemPrune_OrphanCleanup(t *testing.T) {
 	defer os.RemoveAll(tmpLogDir)
 
 	// 自定义路由，将 LogPath 指向临时目录
-	db, err := sqlite.InitDB("file:mem_prune_1?mode=memory&cache=shared")
+	db, taskRepo, err := db.InitTestDB("file:mem_prune_1?mode=memory&cache=shared")
 	if err != nil {
 		t.Fatalf("failed to open memory db: %v", err)
 	}
@@ -94,8 +94,8 @@ func TestAPI_SystemPrune_OrphanCleanup(t *testing.T) {
 		},
 	}
 
-	engine := application.NewDeployEngine(db, nil)
-	r := SetupRoutes(mockConfig, db, engine)
+	engine := application.NewDeployEngine(taskRepo, nil)
+	r := SetupRoutes(mockConfig, db, taskRepo, engine)
 
 	req, _ := http.NewRequest("POST", "/api/system/prune", nil)
 	adminToken, _ := application.GenerateToken("admin", "admin", "test-secret-key-12345", 5*time.Second)
@@ -141,7 +141,7 @@ func TestAPI_DiffCache_MaxSizeLimit(t *testing.T) {
 	}
 	defer os.RemoveAll(tmpLogDir)
 
-	db, err := sqlite.InitDB("file:mem_prune_2?mode=memory&cache=shared")
+	db, taskRepo, err := db.InitTestDB("file:mem_prune_2?mode=memory&cache=shared")
 	if err != nil {
 		t.Fatalf("failed to open memory db: %v", err)
 	}
@@ -189,8 +189,8 @@ func TestAPI_DiffCache_MaxSizeLimit(t *testing.T) {
 		},
 	}
 
-	engine := application.NewDeployEngine(db, nil)
-	r := SetupRoutes(mockConfig, db, engine)
+	engine := application.NewDeployEngine(taskRepo, nil)
+	r := SetupRoutes(mockConfig, db, taskRepo, engine)
 
 	req, _ := http.NewRequest("GET", "/api/tasks/201/diff", nil)
 	adminToken, _ := application.GenerateToken("admin", "admin", "test-secret-key-12345", 5*time.Second)

@@ -34,17 +34,18 @@ var diffSemaphore = make(chan struct{}, 5)
 type APIHandler struct {
 	config   *domain.Config
 	db       *sql.DB
+	taskRepo domain.TaskRepository
 	executor ssh.RemoteExecutor
 	engine   *application.DeployEngine
 }
 
-func SetupRoutes(config *domain.Config, db *sql.DB, engine *application.DeployEngine) *gin.Engine {
-	return SetupRoutesWithExecutor(config, db, nil, engine)
+func SetupRoutes(config *domain.Config, db *sql.DB, taskRepo domain.TaskRepository, engine *application.DeployEngine) *gin.Engine {
+	return SetupRoutesWithExecutor(config, db, taskRepo, nil, engine)
 }
 
 // SetupRoutesWithExecutor 允许传入模拟 Executor 以支持测试驱动开发 (TDD)
 // @Ref: docs/sps/plans/20260527_nanoplan_tdd_enhanced.md | @Date: 2026-05-27
-func SetupRoutesWithExecutor(config *domain.Config, db *sql.DB, executor ssh.RemoteExecutor, engine *application.DeployEngine) *gin.Engine {
+func SetupRoutesWithExecutor(config *domain.Config, db *sql.DB, taskRepo domain.TaskRepository, executor ssh.RemoteExecutor, engine *application.DeployEngine) *gin.Engine {
 	r := gin.New()
 	r.Use(gin.Logger(), gin.Recovery())
 
@@ -58,6 +59,7 @@ func SetupRoutesWithExecutor(config *domain.Config, db *sql.DB, executor ssh.Rem
 	handler := &APIHandler{
 		config:   config,
 		db:       db,
+		taskRepo: taskRepo,
 		executor: executor,
 		engine:   engine,
 	}
@@ -1006,7 +1008,7 @@ func (h *APIHandler) HandleTriggerRollback(c *gin.Context) {
 	}
 
 	// 异步调用回滚（精准切换，同时支持 Mock 注入）
-	engine := application.NewDeployEngine(h.db, h.executor)
+	engine := application.NewDeployEngine(h.taskRepo, h.executor)
 
 	// 这里支持为每个服务器逐一精准回滚到目标 task
 	for _, srv := range targetEnv.Servers {

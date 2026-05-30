@@ -3,7 +3,7 @@ package api
 import (
 	"deploy/godeployer/application"
 	"deploy/godeployer/domain"
-	"deploy/godeployer/infrastructure/sqlite"
+	"deploy/godeployer/infrastructure/db"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -15,7 +15,7 @@ import (
 func TestAPI_SqlitePureGo_Connection(t *testing.T) {
 	// 初始化内存数据库，使用我们 InitDB 封装
 	dsn := fmt.Sprintf("file:mem_purego_%d?mode=memory&cache=shared", time.Now().UnixNano())
-	db, err := sqlite.InitDB(dsn)
+	db, _, err := db.InitTestDB(dsn)
 	if err != nil {
 		t.Fatalf("failed to init database: %v", err)
 	}
@@ -35,7 +35,7 @@ func TestAPI_SqlitePureGo_Connection(t *testing.T) {
 
 // TestAPI_DiffSemaphoreThrottling 验证并发 Diff 请求的限流控制机制 (RED 阶段期望失败)
 func TestAPI_DiffSemaphoreThrottling(t *testing.T) {
-	db, err := sqlite.InitDB(fmt.Sprintf("file:mem_sem_%d?mode=memory&cache=shared", time.Now().UnixNano()))
+	db, taskRepo, err := db.InitTestDB(fmt.Sprintf("file:mem_sem_%d?mode=memory&cache=shared", time.Now().UnixNano()))
 	if err != nil {
 		t.Fatalf("failed to init database: %v", err)
 	}
@@ -57,8 +57,8 @@ func TestAPI_DiffSemaphoreThrottling(t *testing.T) {
 		},
 	}
 
-	engine := application.NewDeployEngine(db, nil)
-	r := SetupRoutes(cfg, db, engine)
+	engine := application.NewDeployEngine(taskRepo, nil)
+	r := SetupRoutes(cfg, db, taskRepo, engine)
 
 	adminToken, _ := application.GenerateToken("admin", "admin", "sem-secret-key-12345", 5*time.Second)
 

@@ -2,7 +2,7 @@ package api
 
 import (
 	"deploy/godeployer/domain"
-	"deploy/godeployer/infrastructure/sqlite"
+	"deploy/godeployer/infrastructure/db"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -23,7 +23,7 @@ func TestAPI_BranchDeployDiff_Fallback(t *testing.T) {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	db, err := sqlite.InitDB(fmt.Sprintf("file:mem_branchdiff_%d?mode=memory&cache=shared", time.Now().UnixNano()))
+	db, _, err := db.InitTestDB(fmt.Sprintf("file:mem_branchdiff_%d?mode=memory&cache=shared", time.Now().UnixNano()))
 	if err != nil {
 		t.Fatalf("failed to init DB: %v", err)
 	}
@@ -108,7 +108,7 @@ func TestAPI_BranchDeployDiff_NoCache_Fallback(t *testing.T) {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	db, err := sqlite.InitDB(fmt.Sprintf("file:mem_nocache_%d?mode=memory&cache=shared", time.Now().UnixNano()))
+	db, _, err := db.InitTestDB(fmt.Sprintf("file:mem_nocache_%d?mode=memory&cache=shared", time.Now().UnixNano()))
 	if err != nil {
 		t.Fatalf("failed to init DB: %v", err)
 	}

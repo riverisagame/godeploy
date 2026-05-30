@@ -16,4 +16,13 @@ type ProjectRepository interface {
 
 // TaskRepository 定义了对部署任务的记录持久化操作接口
 type TaskRepository interface {
+	InsertTask(task *DeployTask) error
+	GetTaskByID(id int) (*DeployTask, error)
+	GetTasksByEnv(projectID, envID string, limit int) ([]DeployTask, error)
+	DeleteTasks(ids []int) error
+	UpdateTaskStatus(id int, status string) error
+	GetStalledTasks() ([]DeployTask, error)
+	UpdateTaskStatusBatch(ids []int, status string) error
+	CountTasksByEnv(projectID, envID string) (int, error)
+	GetTasksByEnvAsc(projectID, envID string, limit int) ([]DeployTask, error)
 }

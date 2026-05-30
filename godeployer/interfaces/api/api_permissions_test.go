@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"deploy/godeployer/application"
 	"deploy/godeployer/domain"
-	"deploy/godeployer/infrastructure/sqlite"
+	"deploy/godeployer/infrastructure/db"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -14,7 +14,7 @@ import (
 
 func TestProjectPermissions(t *testing.T) {
 	// 准备测试环境
-	db, err := sqlite.InitDB(":memory:")
+	db, taskRepo, err := db.InitTestDB(":memory:")
 	if err != nil {
 		t.Fatalf("Failed to init db: %v", err)
 	}
@@ -51,8 +51,8 @@ func TestProjectPermissions(t *testing.T) {
 			"proj_b": {ID: "proj_b", Name: "Project B"},
 		},
 	}
-	engine := application.NewDeployEngine(db, nil)
-	r := SetupRoutes(config, db, engine)
+	engine := application.NewDeployEngine(taskRepo, nil)
+	r := SetupRoutes(config, db, taskRepo, engine)
 
 	t.Run("user1 sees all projects", func(t *testing.T) {
 		token, _ := application.GenerateToken("user1", "deployer", "secret", time.Hour)

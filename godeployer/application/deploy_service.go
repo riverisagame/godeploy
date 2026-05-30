@@ -3,7 +3,6 @@ package application
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"deploy/godeployer/infrastructure/git"
 	"deploy/godeployer/infrastructure/sys"
 	"encoding/json"
@@ -30,7 +29,7 @@ var (
 // DeployJob is now domain.DeployJob
 
 type DeployEngine struct {
-	db       *sql.DB
+	taskRepo domain.TaskRepository
 	executor ssh.RemoteExecutor
 
 	pools  map[string]*ssh.SSHPool
@@ -44,9 +43,9 @@ type DeployEngine struct {
 	projectLocks sync.Map
 }
 
-func NewDeployEngine(db *sql.DB, executor ssh.RemoteExecutor) *DeployEngine {
+func NewDeployEngine(taskRepo domain.TaskRepository, executor ssh.RemoteExecutor) *DeployEngine {
 	return &DeployEngine{
-		db:       db,
+		taskRepo: taskRepo,
 		executor: executor,
 		queue:    make(chan *domain.DeployJob, 50),
 		pools:    make(map[string]*ssh.SSHPool),
@@ -115,24 +114,18 @@ func (e *DeployEngine) SwitchSymlink(server domain.ServerConfig, releaseName str
 // RunRollbackToTask 将指定项目和环境的目标服务器回滚到指定的任务 ID 对应的 Release 版本。
 // @Ref: docs/sps/plans/20260527_nanoplan_tdd_enhanced.md | @Date: 2026-05-27
 func (e *DeployEngine) RunRollbackToTask(targetTaskID int64, server domain.ServerConfig) error {
-	if e.db == nil {
-		return fmt.Errorf("database connection is required for rollback")
+	if e.taskRepo == nil {
+		return fmt.Errorf("task repository is required for rollback")
 	}
 
-	// 查询目标任务的 release_name 并校验是否为成功状态
-	querySQL := `
-		SELECT release_name 
-		FROM deploy_tasks 
-		WHERE id = ? AND status = 'success'`
-
-	var releaseName string
-	err := e.db.QueryRow(querySQL, targetTaskID).Scan(&releaseName)
+	task, err := e.taskRepo.GetTaskByID(int(targetTaskID))
 	if err != nil {
-		if err == sql.ErrNoRows {
-			return fmt.Errorf("specified task is not a successful release or does not exist")
-		}
 		return fmt.Errorf("failed to query rollback version: %w", err)
 	}
+	if task == nil || task.Status != "success" {
+		return fmt.Errorf("specified task is not a successful release or does not exist")
+	}
+	releaseName := task.ReleaseName
 
 	// 将目标服务器软链接切换到对应版本
 	if err := e.SwitchSymlink(server, releaseName); err != nil {
@@ -140,11 +133,7 @@ func (e *DeployEngine) RunRollbackToTask(targetTaskID int64, server domain.Serve
 	}
 
 	// 更新目标任务的状态为已回滚 (仅作标记)
-	updateSQL := `
-		UPDATE deploy_tasks 
-		SET status = 'rolled_back' 
-		WHERE id = ?`
-	if _, err := e.db.Exec(updateSQL, targetTaskID); err != nil {
+	if err := e.taskRepo.UpdateTaskStatus(int(targetTaskID), "rolled_back"); err != nil {
 		return fmt.Errorf("database update failed but symlink rollback succeeded: %w", err)
 	}
 
@@ -154,23 +143,28 @@ func (e *DeployEngine) RunRollbackToTask(targetTaskID int64, server domain.Serve
 // RunRollback 将指定项目和环境的目标服务器回滚到上一个成功的 Release 版本。
 // @Ref: docs/sps/plans/20260527_nanoplan_tdd_enhanced.md | @Date: 2026-05-27
 func (e *DeployEngine) RunRollback(projectID, envID string, server domain.ServerConfig) error {
-	if e.db == nil {
-		return fmt.Errorf("database connection is required for rollback")
+	if e.taskRepo == nil {
+		return fmt.Errorf("task repository is required for rollback")
 	}
 
-	querySQL := `
-		SELECT id 
-		FROM deploy_tasks 
-		WHERE project_id = ? AND env_id = ? AND status = 'success' 
-		ORDER BY id DESC LIMIT 1 OFFSET 1`
-
-	var prevTaskID int64
-	err := e.db.QueryRow(querySQL, projectID, envID).Scan(&prevTaskID)
+	tasks, err := e.taskRepo.GetTasksByEnv(projectID, envID, 10)
 	if err != nil {
-		if err == sql.ErrNoRows {
-			return fmt.Errorf("no previous successful release found to rollback to")
-		}
 		return fmt.Errorf("failed to query rollback version: %w", err)
+	}
+	
+	var prevTaskID int64
+	var successCount int
+	for _, t := range tasks {
+		if t.Status == "success" {
+			successCount++
+			if successCount == 2 {
+				prevTaskID = int64(t.ID)
+				break
+			}
+		}
+	}
+	if prevTaskID == 0 {
+		return fmt.Errorf("no previous successful release found to rollback to")
 	}
 
 	return e.RunRollbackToTask(prevTaskID, server)
@@ -249,14 +243,17 @@ func (e *DeployEngine) RunDeploy(ctx context.Context, taskID int64, config *doma
 	}
 
 	// 从数据库查询任务信息
-	var projectID, envID, commitID, releaseName, extraExclude string
-	err := e.db.QueryRow("SELECT project_id, env_id, commit_id, release_name, extra_exclude FROM deploy_tasks WHERE id = ?", taskID).
-		Scan(&projectID, &envID, &commitID, &releaseName, &extraExclude)
-	if err != nil {
+	task, err := e.taskRepo.GetTaskByID(int(taskID))
+	if err != nil || task == nil {
 		log.Printf("[Task %d] Failed to query task: %v", taskID, err)
 		e.UpdateTaskStatus(taskID, "failed")
 		return
 	}
+	projectID := task.ProjectID
+	envID := task.EnvID
+	commitID := task.CommitID
+	releaseName := task.ReleaseName
+	extraExclude := task.ExtraExclude
 
 	lockKey := fmt.Sprintf("%s:%s", projectID, envID)
 	if _, loaded := e.projectLocks.LoadOrStore(lockKey, struct{}{}); loaded {
@@ -367,8 +364,13 @@ func (e *DeployEngine) RunDeploy(ctx context.Context, taskID int64, config *doma
 
 	// 获取上一个成功版本，用作 Rsync link-dest 硬链接参考
 	var prevReleaseName string
-	prevSQL := `SELECT release_name FROM deploy_tasks WHERE project_id = ? AND env_id = ? AND status = 'success' ORDER BY id DESC LIMIT 1`
-	_ = e.db.QueryRow(prevSQL, projectID, envID).Scan(&prevReleaseName)
+	tasks, _ := e.taskRepo.GetTasksByEnv(projectID, envID, 5)
+	for _, t := range tasks {
+		if t.Status == "success" {
+			prevReleaseName = t.ReleaseName
+			break
+		}
+	}
 
 	for _, srv := range targetEnv.Servers {
 		wg.Add(1)
@@ -511,9 +513,15 @@ func (e *DeployEngine) RunDeploy(ctx context.Context, taskID int64, config *doma
 				defer func() { <-sem }()
 
 				var rbReleaseName string
-				rbSQL := `SELECT release_name FROM deploy_tasks WHERE project_id = ? AND env_id = ? AND status = 'success' ORDER BY id DESC LIMIT 1`
-				if err := e.db.QueryRow(rbSQL, projectID, envID).Scan(&rbReleaseName); err != nil {
-					if err != sql.ErrNoRows {
+				tasks, err := e.taskRepo.GetTasksByEnv(projectID, envID, 5)
+				for _, t := range tasks {
+					if t.Status == "success" {
+						rbReleaseName = t.ReleaseName
+						break
+					}
+				}
+				if rbReleaseName == "" {
+					if err != nil {
 						writeLog("Rollback Error: failed to query last success release for %s: %v", srv.Host, err)
 						rbMu.Lock()
 						rollbackFailed = true
@@ -551,7 +559,7 @@ func (e *DeployEngine) RunDeploy(ctx context.Context, taskID int64, config *doma
 }
 
 func (e *DeployEngine) UpdateTaskStatus(taskID int64, status string) {
-	_, err := e.db.Exec("UPDATE deploy_tasks SET status = ? WHERE id = ?", status, taskID)
+	err := e.taskRepo.UpdateTaskStatus(int(taskID), status)
 	if err != nil {
 		log.Printf("Failed to update task status in DB: %v", err)
 	}
@@ -569,13 +577,20 @@ func (e *DeployEngine) cacheTaskDiff(taskID int64, projectID, envID, commitID, r
 
 	// 查询前置成功部署的 commit_id
 	var prevCommit, targetType string
-	_ = e.db.QueryRow("SELECT target_type FROM deploy_tasks WHERE id = ?", taskID).Scan(&targetType)
-
-	err := e.db.QueryRow(`
-		SELECT commit_id FROM deploy_tasks 
-		WHERE project_id = ? AND env_id = ? AND id < ? AND status = 'success' 
-		ORDER BY id DESC LIMIT 1`, projectID, envID, taskID).Scan(&prevCommit)
-	if err != nil {
+	task, err := e.taskRepo.GetTaskByID(int(taskID))
+	if task != nil {
+		targetType = task.TargetType
+	}
+	tasks, err := e.taskRepo.GetTasksByEnv(projectID, envID, 100)
+	if err == nil {
+		for _, t := range tasks {
+			if t.ID < int(taskID) && t.Status == "success" {
+				prevCommit = t.CommitID
+				break
+			}
+		}
+	}
+	if prevCommit == "" {
 		log.Printf("[Task %d] Diff cache skipped: no previous successful deploy for %s/%s", taskID, projectID, envID)
 		return
 	}
@@ -629,7 +644,9 @@ func (e *DeployEngine) cacheTaskDiff(taskID int64, projectID, envID, commitID, r
 
 	// 写入缓存文件（含磁盘预留检查）
 	var createdTime string
-	_ = e.db.QueryRow("SELECT created_at FROM deploy_tasks WHERE id = ?", taskID).Scan(&createdTime)
+	if task != nil {
+		createdTime = task.CreatedAt.Format("2006-01-02 15:04:05")
+	}
 	createdYM := "default"
 	if len(createdTime) >= 7 {
 		createdYM = strings.ReplaceAll(createdTime[:7], "-", "")

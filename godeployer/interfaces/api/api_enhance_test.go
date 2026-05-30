@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"deploy/godeployer/application"
 	"deploy/godeployer/domain"
-	"deploy/godeployer/infrastructure/sqlite"
+	"deploy/godeployer/infrastructure/db"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -23,7 +23,7 @@ import (
 func SetupEnhanceTestRouter(t *testing.T) (*gin.Engine, *sql.DB, func()) {
 	gin.SetMode(gin.TestMode)
 
-	db, err := sqlite.InitDB(fmt.Sprintf("file:mem_enhance_%d?mode=memory&cache=shared", time.Now().UnixNano()))
+	db, taskRepo, err := db.InitTestDB(fmt.Sprintf("file:mem_enhance_%d?mode=memory&cache=shared", time.Now().UnixNano()))
 	if err != nil {
 		t.Fatalf("failed to init DB: %v", err)
 	}
@@ -74,9 +74,9 @@ func SetupEnhanceTestRouter(t *testing.T) (*gin.Engine, *sql.DB, func()) {
 		},
 	}
 
-	engine := application.NewDeployEngine(db, nil)
+	engine := application.NewDeployEngine(taskRepo, nil)
 	engine.StartDispatcher(1)
-	r := SetupRoutes(mockConfig, db, engine)
+	r := SetupRoutes(mockConfig, db, taskRepo, engine)
 
 	cleanup := func() {
 		engine.Close(2 * time.Second)
@@ -180,7 +180,7 @@ func TestAPI_JSON_ChangesCache(t *testing.T) {
 	defer os.RemoveAll(tmpLogDir)
 
 	// 使用 InitDB 替代裸 sql.Open，防止因没有初始化权限表导致 403 Access Denied
-	db, err := sqlite.InitDB(fmt.Sprintf("file:mem_cache_%d?mode=memory&cache=shared", time.Now().UnixNano()))
+	db, taskRepo, err := db.InitTestDB(fmt.Sprintf("file:mem_cache_%d?mode=memory&cache=shared", time.Now().UnixNano()))
 	if err != nil {
 		t.Fatalf("failed to init DB: %v", err)
 	}
@@ -222,8 +222,8 @@ func TestAPI_JSON_ChangesCache(t *testing.T) {
 		},
 	}
 
-	engine := application.NewDeployEngine(db, nil)
-	r := SetupRoutes(mockConfig, db, engine)
+	engine := application.NewDeployEngine(taskRepo, nil)
+	r := SetupRoutes(mockConfig, db, taskRepo, engine)
 
 	req, _ := http.NewRequest("GET", "/api/tasks/501/diff", nil)
 	adminToken, _ := application.GenerateToken("admin", "admin", "test-secret-key-12345", 5*time.Second)
@@ -273,7 +273,7 @@ func TestAPI_DualDiff_PersistenceAndFallback(t *testing.T) {
 	}
 	defer os.RemoveAll(tmpLogDir)
 
-	db, err := sqlite.InitDB(fmt.Sprintf("file:mem_dualdiff_%d?mode=memory&cache=shared", time.Now().UnixNano()))
+	db, taskRepo, err := db.InitTestDB(fmt.Sprintf("file:mem_dualdiff_%d?mode=memory&cache=shared", time.Now().UnixNano()))
 	if err != nil {
 		t.Fatalf("failed to init DB: %v", err)
 	}
@@ -315,8 +315,8 @@ func TestAPI_DualDiff_PersistenceAndFallback(t *testing.T) {
 		},
 	}
 
-	engine := application.NewDeployEngine(db, nil)
-	r := SetupRoutes(mockConfig, db, engine)
+	engine := application.NewDeployEngine(taskRepo, nil)
+	r := SetupRoutes(mockConfig, db, taskRepo, engine)
 
 	adminToken, _ := application.GenerateToken("admin", "admin", "test-secret-key-12345", 5*time.Second)
 

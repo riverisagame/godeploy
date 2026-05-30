@@ -7,7 +7,7 @@ import (
 	"database/sql"
 	"deploy/godeployer/application"
 	"deploy/godeployer/domain"
-	"deploy/godeployer/infrastructure/sqlite"
+	"deploy/godeployer/infrastructure/db"
 	"deploy/godeployer/infrastructure/ssh"
 	"encoding/json"
 	"fmt"
@@ -28,7 +28,7 @@ func SetupTestRouter(t *testing.T) (*gin.Engine, *sql.DB, func()) {
 	gin.SetMode(gin.TestMode)
 
 	// 使用内存数据库
-	db, err := sqlite.InitDB(fmt.Sprintf("file:mem_%d?mode=memory&cache=shared", time.Now().UnixNano()))
+	db, taskRepo, err := db.InitTestDB(fmt.Sprintf("file:mem_%d?mode=memory&cache=shared", time.Now().UnixNano()))
 	if err != nil {
 		t.Fatalf("failed to init DB: %v", err)
 	}
@@ -67,9 +67,9 @@ func SetupTestRouter(t *testing.T) (*gin.Engine, *sql.DB, func()) {
 	}
 
 	// 注册路由
-	engine := application.NewDeployEngine(db, nil)
+	engine := application.NewDeployEngine(taskRepo, nil)
 	engine.StartDispatcher(1)
-	r := SetupRoutes(mockConfig, db, engine)
+	r := SetupRoutes(mockConfig, db, taskRepo, engine)
 
 	cleanup := func() {
 		engine.Close(2 * time.Second)
@@ -82,7 +82,7 @@ func SetupTestRouter(t *testing.T) (*gin.Engine, *sql.DB, func()) {
 func SetupTestRouterWithExecutor(t *testing.T, executor ssh.RemoteExecutor) (*gin.Engine, *sql.DB, func()) {
 	gin.SetMode(gin.TestMode)
 
-	db, err := sqlite.InitDB(fmt.Sprintf("file:mem_%d?mode=memory&cache=shared", time.Now().UnixNano()))
+	db, taskRepo, err := db.InitTestDB(fmt.Sprintf("file:mem_%d?mode=memory&cache=shared", time.Now().UnixNano()))
 	if err != nil {
 		t.Fatalf("failed to init DB: %v", err)
 	}
@@ -119,9 +119,9 @@ func SetupTestRouterWithExecutor(t *testing.T, executor ssh.RemoteExecutor) (*gi
 		},
 	}
 
-	engine := application.NewDeployEngine(db, executor)
+	engine := application.NewDeployEngine(taskRepo, executor)
 	engine.StartDispatcher(1)
-	r := SetupRoutesWithExecutor(mockConfig, db, executor, engine)
+	r := SetupRoutesWithExecutor(mockConfig, db, taskRepo, executor, engine)
 
 	cleanup := func() {
 		engine.Close(2 * time.Second)

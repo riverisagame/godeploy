@@ -50,3 +50,5 @@
 | 2026-05-30 | TASK-022 | DEMO_UI_FIX_AND_MORE_HISTORY | docs/sps/plans/20260530_frontend_wsl_optimization_plan.md | BUILD_SUCCESS |
 | 2026-05-30 | TASK-001 | 架构 | docs/sps/decisions/001-embrace-ddd.md | 决策：拥抱DDD拆包 |
 | 2026-05-30 | TASK-002 | 架构 | docs/sps/plans/001-ddd-refactor-plan.md | 已起草，等待核对 |
+| 2026-05-30 | goal_multi_db | domain/infrastructure | docs/sps/plans/20260530_goal_multi_db_plan.md | IN_PROGRESS |
+

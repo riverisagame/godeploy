@@ -70,14 +70,20 @@ type ServerConfig struct {
 }
 
 // UserResponse 及相关 DTO
+// 我们为 GORM 定义统一表名 `users` 并在原 Response 实体上映射 DB 字段
 type UserResponse struct {
-	ID                 int       `json:"id"`
-	Username           string    `json:"username"`
-	Role               string    `json:"role"`
-	CreatedAt          time.Time `json:"created_at"`
-	BoundGitAuthors    string    `json:"bound_git_authors"`
-	RestrictGitAuthors bool      `json:"restrict_git_authors"`
-	PermittedProjects  string    `json:"permitted_projects"`
+	ID                 int       `json:"id" gorm:"primaryKey;autoIncrement"`
+	Username           string    `json:"username" gorm:"uniqueIndex;not null"`
+	Role               string    `json:"role" gorm:"not null"`
+	CreatedAt          time.Time `json:"created_at" gorm:"not null"`
+	BoundGitAuthors    string    `json:"bound_git_authors" gorm:"default:''"`
+	RestrictGitAuthors bool      `json:"restrict_git_authors" gorm:"default:false"`
+	PermittedProjects  string    `json:"permitted_projects" gorm:"default:'*'"`
+	PasswordHash       string    `json:"-" gorm:"not null"` // For DB only, not serialized in JSON
+}
+
+func (UserResponse) TableName() string {
+	return "users"
 }
 
 // GitCommit 实体
@@ -86,4 +92,25 @@ type GitCommit struct {
 	Message   string `json:"message"`
 	Author    string `json:"author"`
 	CreatedAt string `json:"created_at"`
+}
+
+// DeployTask 记录部署任务状态的实体（对应数据库中的 deploy_tasks 表）
+type DeployTask struct {
+	ID             int       `json:"id" gorm:"primaryKey;autoIncrement"`
+	ProjectID      string    `json:"project_id" gorm:"not null;index"`
+	EnvID          string    `json:"env_id" gorm:"not null;index"`
+	CommitID       string    `json:"commit_id" gorm:"not null"`
+	Status         string    `json:"status" gorm:"not null;index"`
+	ReleaseName    string    `json:"release_name" gorm:"not null"`
+	UserID         int       `json:"user_id" gorm:"not null"`
+	Username       string    `json:"username" gorm:"not null"`
+	ConfigSnapshot string    `json:"config_snapshot" gorm:"not null"`
+	CreatedAt      time.Time `json:"created_at" gorm:"not null"`
+	Description    string    `json:"description" gorm:"default:''"`
+	ExtraExclude   string    `json:"extra_exclude" gorm:"default:''"`
+	TargetType     string    `json:"target_type" gorm:"default:''"`
+}
+
+func (DeployTask) TableName() string {
+	return "deploy_tasks"
 }
