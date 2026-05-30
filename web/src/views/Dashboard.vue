@@ -160,17 +160,10 @@
 
 <script setup lang="ts">
 import { ref, onMounted, reactive, nextTick, computed } from 'vue'
-import ProjectSidebar from '../components/ProjectSidebar.vue'
-import DeployForm from '../components/DeployForm.vue'
-import DeployHistoryTable from '../components/DeployHistoryTable.vue'
-import LogTerminal from '../components/LogTerminal.vue'
-import UserSettingsDialog from '../components/UserSettingsDialog.vue'
-import { html } from 'diff2html'
-import 'diff2html/bundles/css/diff2html.min.css'
 import { useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
 import axios from 'axios'
-import { getStatusTagType, getStatusText, formatTime, buildWSUrl, createDeployState } from '../utils/deploy'
+import { getStatusTagType, getStatusText, formatTime, createDeployState } from '../utils/deploy'
 
 const router = useRouter()
 const currentUser = ref(localStorage.getItem('username') || 'Admin')
@@ -553,6 +546,11 @@ const triggerDeploy = async (env: Environment) => {
   deployState.phase = 'confirming'
   pendingDeployEnv.value = env
   await previewDeployDiff(env)
+}
+
+function handleDiffClose() {
+  diffVisible.value = false
+  deployState.phase = 'idle'
 }
 
 const executeDeploy = async () => {

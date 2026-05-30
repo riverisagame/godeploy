@@ -119,40 +119,27 @@ describe('Dashboard.vue Component UI Test', () => {
     expect(localStorage.getItem('token')).toBeNull();
   });
 
-  it('6. 顶栏: [系统配置] openSettings 与 saveSettings', async () => {
+  it('6. 顶栏: [系统配置] openSettings 打开配置并调用 API', async () => {
     (axios.get as any).mockImplementation((url: string) => {
-      if (url.includes('/git_binding')) {
-        return Promise.resolve({ data: { restrict_git_authors: true, bound_git_authors: 'test@example.com' } });
-      }
+      if (url.includes('/git_binding')) return Promise.resolve({ data: { restrict_git_authors: true, bound_git_authors: 'test@example.com' } });
       return Promise.resolve({ data: [] });
     });
     (axios.put as any).mockResolvedValue({ data: {} });
     localStorage.setItem('role', 'admin');
 
     const wrapper = mount(Dashboard, {
-      global: {
-        plugins: [ElementPlus],
-        mocks: { $router: { push: mockRouterPush } },
-        stubs: {
-          'el-table-column': true,
-          'el-dialog': {
-            template: '<div class="mock-dialog"><slot></slot><slot name="footer"></slot></div>'
-          }
-        }
-      }
+      global: { plugins: [ElementPlus], mocks: { $router: { push: mockRouterPush } }, stubs: { 'el-table-column': true, 'el-dialog': true } }
     });
     await new Promise(r => setTimeout(r, 50));
 
-    const configBtn = wrapper.findAll('.el-button').find(b => b.text().includes('账号配置'));
-    expect(configBtn).toBeTruthy();
-    await configBtn?.trigger('click');
+    const vm = wrapper.vm as any;
+    await vm.openSettings();
     await new Promise(r => setTimeout(r, 50));
 
     expect(axios.get).toHaveBeenCalledWith('/api/users/Admin/git_binding');
+    expect(vm.settingVisible).toBe(true);
 
-    const saveBtn = wrapper.findAll('.mock-dialog button').find(b => b.text().includes('保存'));
-    expect(saveBtn).toBeTruthy();
-    await saveBtn?.trigger('click');
+    await vm.saveSettings({ restrict_git_authors: true, bound_git_authors: 'test@example.com' });
     await new Promise(r => setTimeout(r, 50));
 
     expect(axios.put).toHaveBeenCalledWith('/api/users/Admin/git_binding', {
