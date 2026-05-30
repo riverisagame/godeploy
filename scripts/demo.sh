@@ -48,6 +48,12 @@ check_deps() {
       error "缺少依赖: $cmd，请先安装"
     fi
   done
+  # 验证 Go 版本 ≥ 1.21
+  local go_ver
+  go_ver=$(go version | grep -oP 'go\K\d+\.\d+' | head -1)
+  if [ -z "$go_ver" ] || [ "$(printf '%s\n' "1.21" "$go_ver" | sort -V | head -1)" != "1.21" ]; then
+    error "Go 版本需要 ≥ 1.21，当前: $go_ver"
+  fi
   success "依赖检查通过"
 }
 
@@ -61,7 +67,9 @@ clone_repos() {
   # ThinkPHP
   if [ ! -d "$GITEE_WORKSPACE/think/.git" ]; then
     info "克隆 ThinkPHP..."
-    git clone --depth=100 https://gitee.com/top-think/think.git "$GITEE_WORKSPACE/think" 2>&1 | tail -3
+    if ! git clone --depth=100 https://gitee.com/top-think/think.git "$GITEE_WORKSPACE/think" 2>&1 | tail -3; then
+      warn "ThinkPHP 克隆失败，跳过（Demo 仍可运行，仅 Diff 功能受限）"
+    fi
   else
     info "ThinkPHP 仓库已存在，跳过克隆"
   fi
@@ -69,7 +77,9 @@ clone_repos() {
   # Webman
   if [ ! -d "$GITEE_WORKSPACE/webman/.git" ]; then
     info "克隆 Webman..."
-    git clone --depth=100 https://gitee.com/walkor/webman.git "$GITEE_WORKSPACE/webman" 2>&1 | tail -3
+    if ! git clone --depth=100 https://gitee.com/walkor/webman.git "$GITEE_WORKSPACE/webman" 2>&1 | tail -3; then
+      warn "Webman 克隆失败，跳过（Demo 仍可运行，仅 Diff 功能受限）"
+    fi
   else
     info "Webman 仓库已存在，跳过克隆"
   fi
@@ -77,10 +87,27 @@ clone_repos() {
   # CRMEB（大型项目，depth=50 避免太慢）
   if [ ! -d "$GITEE_WORKSPACE/CRMEB/.git" ]; then
     info "克隆 CRMEB 商城系统（约 187MB，请稍候）..."
-    git clone --depth=50 https://gitee.com/ZhongBangKeJi/CRMEB.git "$GITEE_WORKSPACE/CRMEB" 2>&1 | tail -3
+    if ! git clone --depth=50 https://gitee.com/ZhongBangKeJi/CRMEB.git "$GITEE_WORKSPACE/CRMEB" 2>&1 | tail -3; then
+      warn "CRMEB 克隆失败，跳过（Demo 仍可运行，仅 Diff 功能受限）"
+    fi
   else
     info "CRMEB 仓库已存在，跳过克隆"
   fi
+
+  # 验证克隆完整性 — 已存在但损坏的仓库会被检出
+  _verify_or_reclone() {
+    local name="$1" url="$2"
+    if [ -d "$GITEE_WORKSPACE/$name/.git" ]; then
+      if ! git -C "$GITEE_WORKSPACE/$name" rev-parse HEAD &>/dev/null; then
+        warn "$name 仓库损坏，重新克隆..."
+        rm -rf "$GITEE_WORKSPACE/$name"
+        git clone --depth=100 "$url" "$GITEE_WORKSPACE/$name" 2>/dev/null || warn "$name 重试克隆失败"
+      fi
+    fi
+  }
+  _verify_or_reclone "think"  "https://gitee.com/top-think/think.git"
+  _verify_or_reclone "webman" "https://gitee.com/walkor/webman.git"
+  _verify_or_reclone "CRMEB"  "https://gitee.com/ZhongBangKeJi/CRMEB.git"
 
   success "所有演示仓库就绪"
 }
@@ -92,21 +119,29 @@ seed_db() {
   info "初始化演示数据库..."
   mkdir -p "$LOG_DIR"
 
-  # 启动后端初始化表结构（如未存在则先启动1秒再杀掉）
+  # 文件锁：防止并发 seed 导致数据交叉写入
+  LOCK_FILE="/tmp/godeployer_demo_seed.lock"
+  exec 200>"$LOCK_FILE"
+  if ! flock -n 200; then
+    error "另一个 seed 进程正在运行，请稍后重试"
+  fi
+  trap "flock -u 200 2>/dev/null; rm -f $LOCK_FILE" EXIT
+
+  # 启动后端初始化表结构（如未存在则先启动再杀掉）
   if [ ! -f "$DB_PATH" ]; then
     info "首次运行，初始化数据库表结构..."
     cd "$REPO_ROOT"
     go run main.go --config="$CONFIG" &
     TMP_PID=$!
-    sleep 3
+    _wait_backend
     kill $TMP_PID 2>/dev/null || true
-    sleep 1
+    wait $TMP_PID 2>/dev/null || true
   fi
 
   info "写入演示任务数据..."
   sqlite3 "$DB_PATH" <<'ENDSQL'
 -- 清理旧 demo 任务
-DELETE FROM deploy_tasks WHERE project_id IN ('backend-api','frontend-web');
+DELETE FROM deploy_tasks WHERE project_id IN ('thinkphp-web','webman-api','crmeb-shop');
 
 -- ============================================================
 -- ThinkPHP 后端框架（5条 - 真实 Gitee commits）
@@ -151,7 +186,7 @@ ENDSQL
 
   success "演示任务数据写入完成（14 条）"
 
-  # 创建演示用户
+  # 创建演示用户（幂等：已存在则跳过）
   info "创建演示用户..."
   _wait_backend
   local TOKEN
@@ -159,19 +194,29 @@ ENDSQL
     -H "Content-Type: application/json" \
     -d '{"username":"admin","password":"admin123"}' | jq -r '.token // empty')
 
-  if [ -n "$TOKEN" ]; then
-    curl -s -X POST "$BASE_URL/api/users" \
-      -H "Content-Type: application/json" \
-      -H "Authorization: Bearer $TOKEN" \
-      -d '{"username":"deployer","password":"deploy123","role":"deployer","permitted_projects":"thinkphp-web,webman-api"}' > /dev/null
-    curl -s -X POST "$BASE_URL/api/users" \
-      -H "Content-Type: application/json" \
-      -H "Authorization: Bearer $TOKEN" \
-      -d '{"username":"viewer","password":"view123","role":"viewer","permitted_projects":"thinkphp-web"}' > /dev/null
-    success "演示用户创建完成 (deployer / viewer)"
-  else
+  if [ -z "$TOKEN" ]; then
     warn "后端未就绪，跳过用户创建（可稍后运行 bash scripts/demo.sh seed）"
+    return
   fi
+
+  _ensure_user() {
+    local uname="$1" pwd="$2" role="$3" projects="$4"
+    local exists
+    exists=$(curl -s -X GET "$BASE_URL/api/users" \
+      -H "Authorization: Bearer $TOKEN" | jq -r --arg u "$uname" '.[] | select(.username==$u) | .username // empty')
+    if [ -n "$exists" ]; then
+      info "用户 $uname 已存在，跳过"
+      return
+    fi
+    curl -s -X POST "$BASE_URL/api/users" \
+      -H "Content-Type: application/json" \
+      -H "Authorization: Bearer $TOKEN" \
+      -d "{\"username\":\"$uname\",\"password\":\"$pwd\",\"role\":\"$role\",\"permitted_projects\":\"$projects\"}" > /dev/null
+    success "用户 $uname 创建完成"
+  }
+
+  _ensure_user "deployer" "deploy123" "deployer" "thinkphp-web,webman-api"
+  _ensure_user "viewer"   "view123"   "viewer"   "thinkphp-web"
 
   # 生成日志文件
   info "生成历史部署日志文件..."
@@ -188,7 +233,11 @@ start_backend() {
   fi
   info "启动 GoDeployer 后端..."
   cd "$REPO_ROOT"
-  nohup go run main.go --config="$CONFIG" > /tmp/godeployer_demo.log 2>&1 &
+  # 清理可能冲突的临时单文件脚本（seed_demo.go / test_hash.go 各含独立 main()）
+  rm -f seed_demo.go test_hash.go
+  # 编译为独立二进制，确保 PID 追踪准确且避免 go run 子进程问题
+  go build -o /tmp/godeployer_demo_bin .
+  nohup /tmp/godeployer_demo_bin --config="$CONFIG" > /tmp/godeployer_demo.log 2>&1 &
   echo $! > "$PID_FILE"
   _wait_backend
   success "后端已启动 → $BASE_URL"
@@ -214,7 +263,9 @@ stop_backend() {
     kill "$(cat $PID_FILE)" 2>/dev/null || true
     rm -f "$PID_FILE"
   fi
+  pkill -f "godeployer_demo_bin" 2>/dev/null || true
   pkill -f "go run main.go" 2>/dev/null || true
+  rm -f /tmp/godeployer_demo_bin
   success "后端已停止"
 }
 

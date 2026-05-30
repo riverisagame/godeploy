@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -40,6 +41,8 @@ type DeployEngine struct {
 	queue  chan *DeployJob
 	wg     sync.WaitGroup
 	closed bool
+	
+	projectLocks sync.Map
 }
 
 func NewDeployEngine(db *sql.DB, executor RemoteExecutor) *DeployEngine {
@@ -257,6 +260,14 @@ func (e *DeployEngine) RunDeploy(ctx context.Context, taskID int64, config *Conf
 		return
 	}
 
+	lockKey := fmt.Sprintf("%s:%s", projectID, envID)
+	if _, loaded := e.projectLocks.LoadOrStore(lockKey, struct{}{}); loaded {
+		log.Printf("[Task %d] Concurrent deployment lock rejected for %s", taskID, lockKey)
+		e.UpdateTaskStatus(taskID, "failed_lock_rejected")
+		return
+	}
+	defer e.projectLocks.Delete(lockKey)
+
 	e.UpdateTaskStatus(taskID, "deploying")
 
 	// 打开日志文件用于输出构建细节
@@ -301,17 +312,29 @@ func (e *DeployEngine) RunDeploy(ctx context.Context, taskID int64, config *Conf
 
 	// 1. 本地检出目录建立
 	buildPath := filepath.Join(config.Global.WorkspacePath, projectID, releaseName)
-	writeLog("Step 1: Cloning repository from %s into %s...", proj.Repo, buildPath)
-	
+	// @Ref: docs/sps/plans/20260530_fix_branch_deploy_diff_freeze_plan.md | @Date: 2026-05-30
+	// 部署前先确保本地 bare 仓库缓存已更新到最新
+	writeLog("Updating local bare repo cache...")
+	if cacheErr := EnsureRepoCache(ctx, proj.Repo, projectID); cacheErr != nil {
+		writeLog("Warning: failed to update bare repo cache: %v", cacheErr)
+	}
+
 	if err := os.MkdirAll(filepath.Dir(buildPath), 0755); err != nil {
 		writeLog("Error: failed to create workspace dir: %v", err)
 		e.UpdateTaskStatus(taskID, "failed")
 		return
 	}
 
-	// 执行 git clone
-	// @Ref: docs/sps/plans/20260527_nanoplan_resilience.md | @Date: 2026-05-27
-	cloneCmd := exec.Command("git", "clone", proj.Repo, buildPath)
+	// 优先从本地 Bare 缓存库中进行 clone，极大加快部署速度，彻底解决外网拉取极慢的问题
+	cacheDir := getCacheDir(projectID)
+	var cloneCmd *exec.Cmd
+	if _, statErr := os.Stat(cacheDir); statErr == nil {
+		writeLog("Step 1: Cloning repository locally from cache %s into %s...", cacheDir, buildPath)
+		cloneCmd = exec.Command("git", "clone", cacheDir, buildPath)
+	} else {
+		writeLog("Step 1: Cloning repository from remote URL %s into %s...", proj.Repo, buildPath)
+		cloneCmd = exec.Command("git", "clone", proj.Repo, buildPath)
+	}
 	if output, err := runCmd(ctx, cloneCmd); err != nil {
 		writeLog("Error: git clone failed: %v (output: %s)", err, string(output))
 		e.UpdateTaskStatus(taskID, "failed")
@@ -378,8 +401,19 @@ func (e *DeployEngine) RunDeploy(ctx context.Context, taskID int64, config *Conf
 					}
 				}
 			}
+			
+			// 过滤可疑注入字符
+			var safeExcludes []string
+			for _, ex := range totalExcludes {
+				if strings.ContainsAny(ex, ";|&`$<>") {
+					writeLog("Warning: Dropped suspicious exclude pattern to prevent shell injection: %s", ex)
+					continue
+				}
+				safeExcludes = append(safeExcludes, ex)
+			}
+			
 			if sshExec, ok := executor.(*SSHExecutor); ok {
-				sshExec.ExcludeList = totalExcludes
+				sshExec.ExcludeList = safeExcludes
 			}
 
 			// 检查目标机 releases 目录是否存在
@@ -512,6 +546,10 @@ func (e *DeployEngine) RunDeploy(ctx context.Context, taskID int64, config *Conf
 
 	writeLog("Deployment completed successfully!")
 	e.UpdateTaskStatus(taskID, "success")
+
+	// @Ref: docs/sps/decisions/20260529_diff_ux_loading_scan.md | @Date: 2026-05-29
+	// 异步生成持久化 diff 快照，确保即使 git 仓库被清理后仍可查看
+	go e.cacheTaskDiff(taskID, projectID, envID, commitID, releaseName, config, logFilePath)
 }
 
 func (e *DeployEngine) UpdateTaskStatus(taskID int64, status string) {
@@ -519,6 +557,122 @@ func (e *DeployEngine) UpdateTaskStatus(taskID int64, status string) {
 	if err != nil {
 		log.Printf("Failed to update task status in DB: %v", err)
 	}
+}
+
+// @Ref: docs/sps/decisions/20260529_diff_ux_loading_scan.md | @Date: 2026-05-29
+// cacheTaskDiff 在部署成功后异步生成持久化 diff 快照。
+// 策略文档要求的"异步落盘"能力，确保即使后续 git 仓库被清理，diff 依然可用。
+func (e *DeployEngine) cacheTaskDiff(taskID int64, projectID, envID, commitID, releaseName string, config *Config, logFilePath string) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[Task %d] Diff cache gen panic (recovered): %v", taskID, r)
+		}
+	}()
+
+	// 查询前置成功部署的 commit_id
+	var prevCommit, targetType string
+	_ = e.db.QueryRow("SELECT target_type FROM deploy_tasks WHERE id = ?", taskID).Scan(&targetType)
+
+	err := e.db.QueryRow(`
+		SELECT commit_id FROM deploy_tasks 
+		WHERE project_id = ? AND env_id = ? AND id < ? AND status = 'success' 
+		ORDER BY id DESC LIMIT 1`, projectID, envID, taskID).Scan(&prevCommit)
+	if err != nil {
+		log.Printf("[Task %d] Diff cache skipped: no previous successful deploy for %s/%s", taskID, projectID, envID)
+		return
+	}
+
+	// 定位 git 仓库目录（优先构建目录，降级为 workspace 搜索）
+	buildPath := filepath.Join(config.Global.WorkspacePath, projectID, releaseName)
+	gitRepoPath := buildPath
+	if _, statErr := os.Stat(filepath.Join(buildPath, ".git")); os.IsNotExist(statErr) {
+		// @Ref: docs/sps/plans/20260530_fix_branch_deploy_diff_freeze_plan.md | @Date: 2026-05-30
+		// 优先使用本地常驻 Bare 缓存目录，避免直接退化到全局 Walk 搜索
+		cacheDir := getCacheDir(projectID)
+		if _, cacheErr := os.Stat(cacheDir); cacheErr == nil {
+			gitRepoPath = cacheDir
+		} else {
+			found, walkErr := findGitRepo(config.Global.WorkspacePath, commitID)
+			if walkErr != nil || found == "" {
+				log.Printf("[Task %d] Diff cache skipped: git repo not found", taskID)
+				return
+			}
+			gitRepoPath = found
+		}
+	}
+
+	// @Ref: docs/sps/plans/20260530_dual_diff_persistence_plan.md | @Date: 2026-05-30
+	// 增量上线（commit）两者都要保留；全量上线（branch/tag）仅保留 git log diff 即可。
+	var liveDiffStr, gitLogDiffStr, filesStr string
+	if targetType == "commit" {
+		liveDiffStr, filesStr = generateTaskDiff(prevCommit, commitID, gitRepoPath, 60*time.Second)
+		if strings.TrimSpace(liveDiffStr) == "" {
+			liveDiffStr = fmt.Sprintf("两次提交内容完全相同（%s → %s），无代码变更。", prevCommit[:8], commitID[:8])
+		}
+		gitLogDiffStr, _ = generateTaskDiff(commitID+"^", commitID, gitRepoPath, 60*time.Second)
+	} else {
+		gitLogDiffStr, filesStr = generateTaskDiff(commitID+"^", commitID, gitRepoPath, 60*time.Second)
+		liveDiffStr = "" // 全量上线不保留线上对比快照
+	}
+
+	// 应用全局限额，并确保 files 与 diff 按文件粒度一致截断
+	limitBytes := config.Global.DiffMaxSizeKB * 1024
+	if limitBytes <= 0 {
+		limitBytes = 5120 * 1024
+	}
+	if len(liveDiffStr) > limitBytes {
+		truncatedDiff := liveDiffStr[:limitBytes]
+		filesStr = filterFilesForTruncatedDiff(truncatedDiff, filesStr)
+		liveDiffStr = truncatedDiff + "\n\n... [DIFF OUT OF LIMIT, TRUNCATED FOR SAFETY]"
+	}
+	if len(gitLogDiffStr) > limitBytes {
+		gitLogDiffStr = gitLogDiffStr[:limitBytes] + "\n\n... [DIFF OUT OF LIMIT, TRUNCATED FOR SAFETY]"
+	}
+
+	// 写入缓存文件（含磁盘预留检查）
+	var createdTime string
+	_ = e.db.QueryRow("SELECT created_at FROM deploy_tasks WHERE id = ?", taskID).Scan(&createdTime)
+	createdYM := "default"
+	if len(createdTime) >= 7 {
+		createdYM = strings.ReplaceAll(createdTime[:7], "-", "")
+	}
+	diffCacheDir := filepath.Join(config.Global.LogPath, "diffs", "projects", projectID, createdYM)
+	if getFreeDiskSpaceMB(config.Global.LogPath) >= config.Global.DiskMinSpaceMB {
+		_ = os.MkdirAll(diffCacheDir, 0755)
+		diffCacheFile := filepath.Join(diffCacheDir, fmt.Sprintf("task_%d_diff.log", taskID))
+		cacheMap := map[string]string{
+			"files":        filesStr,
+			"diff":         liveDiffStr,
+			"git_log_diff": gitLogDiffStr,
+		}
+		if cacheBytes, err := json.Marshal(cacheMap); err == nil {
+			_ = os.WriteFile(diffCacheFile, cacheBytes, 0644)
+			log.Printf("[Task %d] Diff cache written: %s", taskID, diffCacheFile)
+		}
+	}
+}
+
+// generateTaskDiff 执行 git diff 与 git diff --name-status，返回 (diff 文本, files 列表)。
+func generateTaskDiff(prevCommit, currentCommit, gitRepoPath string, timeout time.Duration) (string, string) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	diffCmd := exec.CommandContext(ctx, "git", "diff", prevCommit, currentCommit)
+	diffCmd.Dir = gitRepoPath
+	diffOutput, diffErr := diffCmd.CombinedOutput()
+	diffStr := string(diffOutput)
+	if diffErr != nil {
+		log.Printf("Diff cache: git diff failed: %v", diffErr)
+	}
+
+	var filesStr string
+	filesCmd := exec.CommandContext(ctx, "git", "diff", "--name-status", prevCommit, currentCommit)
+	filesCmd.Dir = gitRepoPath
+	if filesOut, filesErr := filesCmd.CombinedOutput(); filesErr == nil {
+		filesStr = string(filesOut)
+	}
+
+	return diffStr, filesStr
 }
 
 // runCmd 是一个安全的本地命令执行包裹函数，解决 Windows/Linux 等平台在 Context 超时时无法彻底清退整个子进程树的问题。

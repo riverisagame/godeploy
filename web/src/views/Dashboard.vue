@@ -89,172 +89,30 @@
                   </div>
                 </div>
 
-                <!-- 2. 上线发布表单操作区 -->
-                <div class="section-card deploy-action-card">
-                  <div class="card-header">触发部署</div>
-                  
-                  <el-form :model="deployForm" label-position="top">
-                    <el-form-item label="发布目标类型">
-                      <el-radio-group v-model="deployForm.targetType" size="small">
-                        <el-radio-button label="branch">分支</el-radio-button>
-                        <el-radio-button label="tag">Tag</el-radio-button>
-                        <el-radio-button label="commit">历史 Commit</el-radio-button>
-                      </el-radio-group>
-                    </el-form-item>
-
-                    <el-form-item v-if="deployForm.targetType === 'branch' || deployForm.targetType === 'tag'" label="选择分支/Tag">
-                      <el-select 
-                        v-model="deployForm.branch" 
-                        filterable 
-                        allow-create 
-                        placeholder="选择..."
-                        :loading="loadingRefs"
-                        style="width: 100%"
-                      >
-                        <el-option
-                          v-for="item in refsList.filter(r => r.type === deployForm.targetType)"
-                          :key="item.name"
-                          :label="item.name"
-                          :value="item.name"
-                        >
-                          <span style="float: left">{{ item.name }}</span>
-                          <span style="float: right; color: var(--el-text-color-secondary); font-size: 13px">{{ item.hash.substring(0,7) }}</span>
-                        </el-option>
-                      </el-select>
-                    </el-form-item>
-
-                    <div v-if="deployForm.targetType === 'commit'" class="commit-filters" style="margin-bottom: 18px;">
-                      <el-row :gutter="10">
-                        <el-col :span="6">
-                          <el-select v-model="commitFilters.ref" placeholder="分支/Tag" size="small" @change="fetchCommits" clearable filterable style="width: 100%">
-                            <el-option v-for="item in refsList" :key="item.name" :label="item.name" :value="item.name"></el-option>
-                          </el-select>
-                        </el-col>
-                        <el-col :span="6">
-                          <el-input v-model="commitFilters.keyword" placeholder="搜 Message" size="small" @change="fetchCommits" clearable />
-                        </el-col>
-                        <el-col :span="6">
-                          <el-input v-model="commitFilters.author" placeholder="搜提交人" size="small" @change="fetchCommits" clearable />
-                        </el-col>
-                        <el-col :span="6">
-                          <el-input v-model="commitFilters.file" placeholder="搜文件(如 src/main)" size="small" @change="fetchCommits" clearable />
-                        </el-col>
-                      </el-row>
-                      <el-form-item label="选择 Commit" style="margin-top: 10px;">
-                        <el-select 
-                          v-model="deployForm.branch" 
-                          filterable 
-                          remote 
-                          :remote-method="searchCommits" 
-                          :loading="loadingCommits" 
-                          placeholder="选择 Commit..."
-                          style="width: 100%"
-                        >
-                          <el-option v-for="item in commitsList" :key="item.hash" :label="item.message" :value="item.hash">
-                            <div style="display: flex; justify-content: space-between; align-items: center;">
-                              <span style="max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ item.message }}</span>
-                              <span style="font-size: 12px; color: #888;">{{ item.author }} - {{ item.hash.substring(0,7) }}</span>
-                            </div>
-                          </el-option>
-                        </el-select>
-                      </el-form-item>
-                    </div>
-
-                    <!-- 上线备注与文件过滤 -->
-                    <el-form-item label="发布备注/说明" style="margin-top: 15px;">
-                      <el-input 
-                        v-model="deployForm.description" 
-                        placeholder="请输入本次上线的备注说明（如：修复xx Bug）" 
-                        type="textarea" 
-                        :rows="2" 
-                      />
-                    </el-form-item>
-
-
-
-                    <div style="display: flex; gap: 10px; margin-top: 20px;">
-                      <el-button 
-                        type="primary" 
-                        size="large" 
-                        class="trigger-deploy-btn"
-                        @click="triggerDeploy(env)"
-                        style="flex: 1;"
-                      >
-                        <el-icon><Upload /></el-icon> 触发上线
-                      </el-button>
-                      <el-button size="large" @click="previewDeployDiff(env)" :loading="loadingPreviewDiff" style="flex: 1; margin-left: 0;">
-                        <el-icon><View /></el-icon> 预览 Diff
-                      </el-button>
-                    </div>
-                  </el-form>
-                </div>
+                <DeployForm
+                  :refs-list="refsList"
+                  :commits-list="commitsList"
+                  :loading-refs="loadingRefs"
+                  :loading-commits="loadingCommits"
+                  :loading-preview-diff="loadingPreviewDiff"
+                  :target-type="deployForm.targetType"
+                  :branch="deployForm.branch"
+                  :description="deployForm.description"
+                  @update:target-type="deployForm.targetType = $event"
+                  @update:branch="deployForm.branch = $event"
+                  @update:description="deployForm.description = $event"
+                  @deploy="triggerDeploy(env)"
+                  @preview-diff="previewDeployDiff(env)"
+                  @search-commits="fetchCommits"
+                />
               </div>
 
-              <!-- 3. 部署历史记录表格 -->
-              <div class="section-card history-section">
-                <div class="card-header">部署与审计历史</div>
-                <el-table 
-                  :data="historyTasks" 
-                  style="width: 100%" 
-                  size="default"
-                  :row-class-name="(row) => row.row.status === 'failed' ? 'row-failed' : ''"
-                >
-                  <el-table-column prop="id" label="ID" width="60" />
-                  <el-table-column prop="release_name" label="Release 版本" width="155" />
-                  <el-table-column label="Commit" width="105">
-                    <template #default="scope">
-                      <code class="commit-hash">{{ scope.row.commit_id?.substring(0, 8) }}</code>
-                    </template>
-                  </el-table-column>
-                  <el-table-column prop="username" label="操作人" width="100" />
-                  <el-table-column prop="description" label="发布备注" show-overflow-tooltip />
-                  <el-table-column prop="status" label="状态" width="120">
-                    <template #default="scope">
-                      <el-tag :type="getStatusTagType(scope.row.status)" effect="dark">
-                        {{ getStatusText(scope.row.status) }}
-                      </el-tag>
-                    </template>
-                  </el-table-column>
-                  <el-table-column prop="created_at" label="发布时间" width="180">
-                    <template #default="scope">
-                      {{ formatTime(scope.row.created_at) }}
-                    </template>
-                  </el-table-column>
-                  <el-table-column label="操作">
-                    <template #default="scope">
-                      <el-button-group>
-                        <el-button 
-                          size="small" 
-                          type="success" 
-                          plain
-                          :disabled="scope.row.status !== 'success'"
-                          @click="triggerRollback(scope.row)"
-                        >
-                          回滚
-                        </el-button>
-                        <el-button 
-                          size="small" 
-                          type="primary" 
-                          plain
-                          :loading="loadingDiff && diffTaskInfo.startsWith(scope.row.commit_id?.substring(0,8))"
-                          :disabled="loadingDiff"
-                          @click="showDiff(scope.row)"
-                        >
-                          对比
-                        </el-button>
-                        <el-button 
-                          size="small" 
-                          type="info" 
-                          plain
-                          @click="showLog(scope.row)"
-                        >
-                          日志
-                        </el-button>
-                      </el-button-group>
-                    </template>
-                  </el-table-column>
-                </el-table>
-              </div>
+              <DeployHistoryTable
+                :tasks="historyTasks"
+                @rollback="triggerRollback"
+                @show-diff="showDiff"
+                @show-log="showLog"
+              />
             </el-tab-pane>
           </el-tabs>
         </div>
@@ -264,27 +122,12 @@
       </main>
     </div>
 
-    <!-- 实时部署流式日志弹窗 -->
-    <el-dialog 
-      v-model="logVisible" 
-      title="构建与同步日志" 
-      width="80%" 
-      @close="closeLog"
-      :close-on-click-modal="false"
-      destroy-on-close
-    >
-      <transition name="fade-slide" mode="out-in" appear>
-        <div class="terminal-container" :key="currentTaskID">
-          <div class="terminal-header">
-            <span class="dot red"></span>
-            <span class="dot yellow"></span>
-            <span class="dot green"></span>
-            <span class="term-title">Deploy Terminal - Task #{{ currentTaskID }}</span>
-          </div>
-          <pre ref="termBody" class="terminal-body">{{ logText }}</pre>
-        </div>
-      </transition>
-    </el-dialog>
+    <LogTerminal
+      :visible="logVisible"
+      :task="logTask"
+      @close="() => { logVisible = false }"
+      @status-changed="(s: string) => { if (selectedProject) fetchHistory(selectedProject.id, activeEnvTab) }"
+    />
 
     <!-- Git Diff 差异对比弹窗 -->
     <el-dialog
@@ -404,6 +247,9 @@
 <script setup lang="ts">
 import { ref, onMounted, reactive, nextTick, computed } from 'vue'
 import ProjectSidebar from '../components/ProjectSidebar.vue'
+import DeployForm from '../components/DeployForm.vue'
+import DeployHistoryTable from '../components/DeployHistoryTable.vue'
+import LogTerminal from '../components/LogTerminal.vue'
 import { html } from 'diff2html'
 import 'diff2html/bundles/css/diff2html.min.css'
 import { useRouter } from 'vue-router'
@@ -626,11 +472,7 @@ const handleFileTreeNodeClick = async (nodeData: any) => {
 
 // 弹窗状态
 const logVisible = ref(false)
-const currentTaskID = ref<number | null>(null)
-const logText = ref('')
-const termBody = ref<HTMLElement | null>(null)
-let logTimer: number | null = null
-let wsConnection: WebSocket | null = null
+const logTask = ref<Task | null>(null)
 
 const diffVisible = ref(false)
 const diffText = ref('')
@@ -838,127 +680,15 @@ const executeDeploy = async () => {
   }
 }
 
-// 自动滚动探底
-const scrollToBottom = () => {
-  nextTick(() => {
-    if (termBody.value) {
-      termBody.value.scrollTop = termBody.value.scrollHeight
-    }
-  })
-}
 
-// 获取部署日志
-const fetchTaskLog = async (taskId: number) => {
-  try {
-    const res = await axios.get(`/api/tasks/${taskId}/log`)
-    logText.value = res.data.log || '暂无日志输出...'
-    scrollToBottom()
-  } catch (err) {
-    logText.value = '正在等待日志文件生成...'
-  }
-}
-
-// 检查部署状态并中止轮询
-const checkTaskStatus = async (task: Task) => {
-  try {
-    const res = await axios.get(`/api/tasks/${task.id}`)
-    const status = res.data.status
-    const found = historyTasks.value.find(t => t.id === task.id)
-    if (found) {
-      found.status = status
-    }
-    if (status !== 'pending' && status !== 'deploying') {
-      if (logTimer) {
-        clearInterval(logTimer)
-        logTimer = null
-      }
-      fetchHistory(selectedProject.value!.id, activeEnvTab.value)
-    }
-  } catch (err) {
-    // 忽略
-  }
-}
-
-// 建立 WebSocket 连接
-const setupWebSocket = (taskId: number) => {
-  const token = localStorage.getItem('token') || ''
-  // 开发环境下使用本地代理或硬编码
-  const wsUrl = buildWSUrl(window.location.protocol, window.location.host, taskId)
-  wsConnection = new WebSocket(wsUrl)
-
-  wsConnection.onopen = () => {
-    logText.value = 'WebSocket 连接已建立，等待日志流...\n'
-    wsConnection?.send(JSON.stringify({ type: 'auth', token }))
-  }
-
-  let logBuffer = ''
-  let renderFrame: number | null = null
-
-  wsConnection.onmessage = (event) => {
-    logBuffer += event.data
-    if (!renderFrame) {
-      renderFrame = window.requestAnimationFrame(() => {
-        logText.value += logBuffer
-        logBuffer = ''
-        renderFrame = null
-        scrollToBottom()
-      })
-    }
-  }
-
-  wsConnection.onerror = (error) => {
-    console.error('WebSocket Error:', error)
-    if (renderFrame) cancelAnimationFrame(renderFrame)
-    wsConnection?.close()
-  }
-
-  wsConnection.onclose = () => {
-    if (renderFrame) cancelAnimationFrame(renderFrame)
-    // 如果任务仍在进行中，执行优雅降级（HTTP 轮询 fallback）
-    const task = historyTasks.value.find(t => t.id === taskId)
-    if (task && (task.status === 'pending' || task.status === 'deploying')) {
-      if (logTimer) {
-        clearInterval(logTimer)
-      }
-      console.warn('WS disconnected, falling back to HTTP polling')
-      logTimer = window.setInterval(() => {
-        fetchTaskLog(taskId)
-        checkTaskStatus(task)
-      }, 1500)
-    }
-  }
-}
 
 // 打开日志并触发流式轮询或 WS
 // @Ref: docs/sps/plans/20260527_m6_frontend_ir.md | @Date: 2026-05-27
 const showLog = (task: Task) => {
-  currentTaskID.value = task.id
-  logText.value = '正在连接部署服务，拉取日志...'
+  logTask.value = task
   logVisible.value = true
-
-  closeLog() // 清理之前的连接或定时器
-
-  if (task.status === 'pending' || task.status === 'deploying') {
-    setupWebSocket(task.id)
-    // 启动状态轮询以更新前端状态标签
-    logTimer = window.setInterval(() => {
-      checkTaskStatus(task)
-    }, 3000)
-  } else {
-    // 已完成的任务直接通过 HTTP 一次性获取全量日志
-    fetchTaskLog(task.id)
-  }
-}
-
-// 关闭日志弹窗，关闭定时器和 WS 资源
-const closeLog = () => {
-  if (logTimer) {
-    clearInterval(logTimer)
-    logTimer = null
-  }
-  if (wsConnection) {
-    wsConnection.close()
-    wsConnection = null
+  if (selectedProject.value) {
+    fetchHistory(selectedProject.value.id, activeEnvTab.value)
   }
 }
 

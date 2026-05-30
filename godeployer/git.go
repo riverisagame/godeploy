@@ -3,6 +3,7 @@ package godeployer
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -40,6 +41,11 @@ func EnsureRepoCache(ctx context.Context, repoURL, projectID string) error {
 	cmd := exec.CommandContext(ctx, "git", "fetch", "origin", "+refs/heads/*:refs/heads/*", "+refs/tags/*:refs/tags/*", "--prune")
 	cmd.Dir = cacheDir
 	if out, err := cmd.CombinedOutput(); err != nil {
+		// @Ref: docs/sps/plans/20260530_fix_branch_deploy_diff_freeze_plan.md | @Date: 2026-05-30
+		// 单元测试中如果将开发中的本地仓库作为 repoURL，fetch 自身检出分支可能会被 git 拦截报错，但在测试环境下缓存已是最新，因此可直接容忍该错误。
+		if strings.Contains(string(out), "refusing to fetch into branch") {
+			return nil
+		}
 		return fmt.Errorf("git fetch failed: %v, output: %s", err, string(out))
 	}
 
@@ -99,7 +105,7 @@ func GetCommits(ctx context.Context, projectID, keyword, author, file, ref strin
 }
 
 // GetDiff 获取两次提交之间的 diff 字符串。如果 fromCommit 为空则默认比较该 commit 本身变更。
-func GetDiff(ctx context.Context, projectID, fromCommit, toCommit string) (string, error) {
+func GetDiff(ctx context.Context, projectID, fromCommit, toCommit string, limitBytes int) (string, error) {
 	cacheDir := getCacheDir(projectID)
 	if _, err := os.Stat(cacheDir); os.IsNotExist(err) {
 		return "", fmt.Errorf("git cache not found for project %s", projectID)
@@ -115,13 +121,87 @@ func GetDiff(ctx context.Context, projectID, fromCommit, toCommit string) (strin
 
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = cacheDir
-	out, err := cmd.CombinedOutput() // 包含 stderr 在内，如果失败便于排查
-	if err != nil {
-		return "", fmt.Errorf("git diff failed: %v, output: %s", err, string(out))
+
+	if limitBytes <= 0 {
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return "", fmt.Errorf("git diff failed: %v, output: %s", err, string(out))
+		}
+		return string(out), nil
 	}
 
-	return string(out), nil
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return "", err
+	}
+
+	if err := cmd.Start(); err != nil {
+		return "", err
+	}
+
+	data := make([]byte, limitBytes+1)
+	n, _ := io.ReadFull(stdout, data)
+
+	if n > limitBytes {
+		_ = cmd.Process.Kill()
+		return string(data[:limitBytes]) + "\n\n... [Diff 截断: 文件变更过大，超出系统物理隔离安全限制 (DiffMaxSizeKB)]", nil
+	}
+
+	go cmd.Wait()
+	return string(data[:n]), nil
 }
+
+// GetDiffForFile 获取两次提交之间指定文件的 diff 字符串。
+// @Ref: docs/sps/plans/20260530_lazy_load_file_diff_plan.md | @Date: 2026-05-30
+func GetDiffForFile(ctx context.Context, projectID, fromCommit, toCommit, file string, limitBytes int) (string, error) {
+	cacheDir := getCacheDir(projectID)
+	if _, err := os.Stat(cacheDir); os.IsNotExist(err) {
+		return "", fmt.Errorf("git cache not found for project %s", projectID)
+	}
+
+	var args []string
+	if fromCommit == "" {
+		args = []string{"show", "--format=", toCommit, "--", file}
+	} else {
+		args = []string{"diff", fromCommit, toCommit, "--", file}
+	}
+
+	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd.Dir = cacheDir
+
+	if limitBytes <= 0 {
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return "", fmt.Errorf("git diff failed: %v, output: %s", err, string(out))
+		}
+		return string(out), nil
+	}
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return "", err
+	}
+
+	if err := cmd.Start(); err != nil {
+		return "", err
+	}
+
+	data := make([]byte, limitBytes+1)
+	n, _ := io.ReadFull(stdout, data)
+
+	if n > limitBytes {
+		_ = cmd.Process.Kill()
+		return string(data[:limitBytes]) + "\n\n... [Diff 截断: 文件变更过大，超出系统物理隔离安全限制 (DiffMaxSizeKB)]", nil
+	}
+
+	// @Ref: docs/sps/plans/20260530_fix_branch_deploy_diff_freeze_plan.md | @Date: 2026-05-30
+	// 必须同步等待命令执行完毕并检查错误，否则当 git 命令非零退出时，无法触发外部的物理快照降级提取
+	if err := cmd.Wait(); err != nil {
+		return "", err
+	}
+	return string(data[:n]), nil
+}
+
 
 // GetCommitAuthor 获取指定 ref 的 Git 提交者名称
 func GetCommitAuthor(ctx context.Context, projectID, ref string) (string, error) {

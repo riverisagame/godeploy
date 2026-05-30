@@ -14,7 +14,7 @@ environments:
     servers:
       - host: "127.0.0.1"
         port: 22
-        user: "root"
+        user: "dan"
         deploy_to: "/tmp/demo_deploy/thinkphp/staging"
   - id: "production"
     name: "生产环境"
@@ -23,5 +23,5 @@ environments:
     servers:
       - host: "127.0.0.1"
         port: 22
-        user: "root"
+        user: "dan"
         deploy_to: "/tmp/demo_deploy/thinkphp/production"

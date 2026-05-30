@@ -1,0 +1,2 @@
+# 记录全量重构或代码格式化产生的巨大无意义 Commit Hash
+# 执行：git config blame.ignoreRevsFile .git-blame-ignore-revs

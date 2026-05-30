@@ -21,6 +21,10 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+// @Ref: docs/sps/plans/20260530_sqlite_purego_and_performance_gate_plan.md | @Date: 2026-05-30
+// 全局并发限流阀门，限制最大同时执行 5 个并发 Git Diff 比对
+var diffSemaphore = make(chan struct{}, 5)
+
 type APIHandler struct {
 	config   *Config
 	db       *sql.DB
@@ -36,10 +40,10 @@ func SetupRoutes(config *Config, db *sql.DB, engine *DeployEngine) *gin.Engine {
 // @Ref: docs/sps/plans/20260527_nanoplan_tdd_enhanced.md | @Date: 2026-05-27
 func SetupRoutesWithExecutor(config *Config, db *sql.DB, executor RemoteExecutor, engine *DeployEngine) *gin.Engine {
 	r := gin.New()
-	r.Use(gin.Recovery())
+	r.Use(gin.Logger(), gin.Recovery())
 
 	if config.Global.DiffMaxSizeKB <= 0 {
-		config.Global.DiffMaxSizeKB = 2048
+		config.Global.DiffMaxSizeKB = 5120
 	}
 	if config.Global.DiskMinSpaceMB <= 0 {
 		config.Global.DiskMinSpaceMB = 500
@@ -318,6 +322,16 @@ func (h *APIHandler) HandleGetProjectCommits(c *gin.Context) {
 }
 
 func (h *APIHandler) HandleGetProjectPreviewDiff(c *gin.Context) {
+	// @Ref: docs/sps/plans/20260530_sqlite_purego_and_performance_gate_plan.md | @Date: 2026-05-30
+	// 进程并发安全限流，排队 3 秒超时退化，杜绝雪崩卡死
+	select {
+	case diffSemaphore <- struct{}{}:
+		defer func() { <-diffSemaphore }()
+	case <-time.After(3 * time.Second):
+		c.JSON(http.StatusTooManyRequests, gin.H{"error": "系统繁忙，差异比对排队中，请稍后再试"})
+		return
+	}
+
 	projectID := c.Param("id")
 	proj, ok := h.config.Projects[projectID]
 	if !ok {
@@ -338,42 +352,62 @@ func (h *APIHandler) HandleGetProjectPreviewDiff(c *gin.Context) {
 		return
 	}
 
+	envID := c.Query("env_id")
+	if fromCommit == "" && envID != "" {
+		// @Ref: docs/sps/plans/20260530_fix_branch_deploy_diff_freeze_plan.md | @Date: 2026-05-30
+		// 自动查询该项目在此环境上最近一次成功部署的 commit_id 作为 Live Diff 对比基准
+		_ = h.db.QueryRow("SELECT commit_id FROM deploy_tasks WHERE project_id = ? AND env_id = ? AND status = 'success' ORDER BY id DESC LIMIT 1", projectID, envID).Scan(&fromCommit)
+	}
+
+	diffType := c.DefaultQuery("diff_type", "live")
+	fileParam := c.Query("file")
+	if fileParam != "" {
+		// @Ref: docs/sps/plans/20260530_lazy_load_file_diff_plan.md | @Date: 2026-05-30
+		// 只获取单个文件的 diff，直接读取本地 bare 缓存库，免去不必要的 EnsureRepoCache 网络请求以极速响应
+		limitBytes := h.config.Global.DiffMaxSizeKB * 1024
+		baseCommit := fromCommit
+		if diffType == "git_log" {
+			baseCommit = toCommit + "^"
+		}
+		diffText, err := GetDiffForFile(c.Request.Context(), projectID, baseCommit, toCommit, fileParam, limitBytes)
+		if err != nil {
+			diffText = "无法获取该文件的差异对比文本。"
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"diff":  diffText,
+			"files": []string{},
+		})
+		return
+	}
+
 	if err := EnsureRepoCache(c.Request.Context(), proj.Repo, projectID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to update repo cache: %v", err)})
 		return
 	}
 
-	// @Ref: docs/sps/plans/20260529_deploy_enhancements_plan.md | @Date: 2026-05-29
-	// 若 fromCommit 未指定，则通过数据库回溯上一次成功 commit
-	if fromCommit == "" {
-		envID := c.Query("env_id")
-		if envID != "" {
-			_ = h.db.QueryRow(`
-				SELECT commit_id 
-				FROM deploy_tasks 
-				WHERE project_id = ? AND env_id = ? AND status = 'success' 
-				ORDER BY id DESC LIMIT 1`, projectID, envID).Scan(&fromCommit)
+	targetType := c.Query("target_type")
+	if targetType == "" {
+		if isCommitHash(toCommit) {
+			targetType = "commit"
+		} else {
+			targetType = "branch"
 		}
 	}
-	if fromCommit == "" {
-		fromCommit = toCommit + "^"
-	}
 
-	diffText, err := GetDiff(c.Request.Context(), projectID, fromCommit, toCommit)
-	if err != nil {
-		// 降级：如果对比基准不存在，允许返回空内容，而不直接报错 500
-		diffText = "无法获取差异对比文本，可能是基准 Commit 在本地不存在。"
-	}
-
-	// 获取本次变更的文件列表树输入源
-	gitCacheDir := filepath.Join(h.config.Global.WorkspacePath, projectID, "repo_cache")
+	// 如果没有传入 file 参数，我们根据发布类型返回全量或变更文件列表，避开全量大 Diff 的拉取，避免 OOM 并极大提升弹框响应速度
+	gitCacheDir := getCacheDir(projectID)
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "git", "diff", "--name-only", fromCommit, toCommit)
+	var cmd *exec.Cmd
+	if targetType == "commit" {
+		cmd = exec.CommandContext(ctx, "git", "diff", "--name-only", fromCommit, toCommit, "--")
+	} else {
+		cmd = exec.CommandContext(ctx, "git", "ls-tree", "-r", "--name-only", toCommit, "--")
+	}
 	cmd.Dir = gitCacheDir
 	filesOutput, filesErr := cmd.CombinedOutput()
-	var fileList []string
+	fileList := make([]string, 0)
 	if filesErr == nil {
 		lines := strings.Split(string(filesOutput), "\n")
 		for _, line := range lines {
@@ -382,15 +416,22 @@ func (h *APIHandler) HandleGetProjectPreviewDiff(c *gin.Context) {
 				fileList = append(fileList, trimmed)
 			}
 		}
-	} else {
-		fileList = make([]string, 0)
+	}
+
+	// @Ref: docs/sps/plans/20260530_fix_branch_deploy_diff_freeze_plan.md | @Date: 2026-05-30
+	// 限制返回的最大文件树长度（例如最多 2000 个文件），防止前端 Element Plus 树节点过多渲染时挂起
+	const maxFilesLimit = 2000
+	if len(fileList) > maxFilesLimit {
+		fileList = fileList[:maxFilesLimit]
+		fileList = append(fileList, "注意：全量文件数过多已进行截断展示，请在本地 Git 中查看完整目录树")
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"diff":  diffText,
+		"diff":  "",
 		"files": fileList,
 	})
 }
+
 
 type UpdateGitBindingRequest struct {
 	BoundGitAuthors    string `json:"bound_git_authors"`
@@ -552,6 +593,7 @@ type CreateTaskRequest struct {
 	ProjectID    string `json:"project_id" binding:"required"`
 	EnvID        string `json:"env_id" binding:"required"`
 	CommitID     string `json:"commit_id" binding:"required"`
+	TargetType   string `json:"target_type"`
 	Description  string `json:"description"`
 	ExtraExclude string `json:"extra_exclude"`
 }
@@ -636,12 +678,21 @@ func (h *APIHandler) HandleCreateTask(c *gin.Context) {
 
 	releaseName := time.Now().Format("20060102150405")
 
+	targetType := req.TargetType
+	if targetType == "" {
+		if isCommitHash(req.CommitID) {
+			targetType = "commit"
+		} else {
+			targetType = "branch"
+		}
+	}
+
 	// 插入任务记录（初始状态为 pending）
 	insertSQL := `
-		INSERT INTO deploy_tasks (project_id, env_id, commit_id, status, release_name, user_id, username, config_snapshot, description, extra_exclude, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+		INSERT INTO deploy_tasks (project_id, env_id, commit_id, status, release_name, user_id, username, config_snapshot, description, extra_exclude, target_type, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 	
-	res, err := h.db.Exec(insertSQL, req.ProjectID, req.EnvID, req.CommitID, "pending", releaseName, userID, username, "{}", req.Description, req.ExtraExclude, time.Now())
+	res, err := h.db.Exec(insertSQL, req.ProjectID, req.EnvID, req.CommitID, "pending", releaseName, userID, username, "{}", req.Description, req.ExtraExclude, targetType, time.Now())
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create task"})
 		return
@@ -964,8 +1015,17 @@ func (h *APIHandler) HandleTriggerRollback(c *gin.Context) {
 }
 
 // HandleGetTaskDiff 获取当前任务与其前一个成功部署版本之间的 Git Diff
-// @Ref: docs/sps/plans/20260527_nanoplan_tdd_enhanced.md | @Date: 2026-05-27
 func (h *APIHandler) HandleGetTaskDiff(c *gin.Context) {
+	// @Ref: docs/sps/plans/20260530_sqlite_purego_and_performance_gate_plan.md | @Date: 2026-05-30
+	// 进程并发安全限流，排队 3 秒超时退化，杜绝雪崩卡死
+	select {
+	case diffSemaphore <- struct{}{}:
+		defer func() { <-diffSemaphore }()
+	case <-time.After(3 * time.Second):
+		c.JSON(http.StatusTooManyRequests, gin.H{"error": "系统繁忙，差异比对排队中，请稍后再试"})
+		return
+	}
+
 	idStr := c.Param("id")
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
@@ -973,10 +1033,10 @@ func (h *APIHandler) HandleGetTaskDiff(c *gin.Context) {
 		return
 	}
 
-	// 1. 获取当前任务的 commit_id, project_id, release_name, status 及 created_at
-	var projectID, envID, currentCommit, releaseName, status, createdAt string
-	err = h.db.QueryRow("SELECT project_id, env_id, commit_id, release_name, status, created_at FROM deploy_tasks WHERE id = ?", id).
-		Scan(&projectID, &envID, &currentCommit, &releaseName, &status, &createdAt)
+	// 1. 获取当前任务的 commit_id, project_id, release_name, status, created_at 及 target_type
+	var projectID, envID, currentCommit, releaseName, status, createdAt, targetType string
+	err = h.db.QueryRow("SELECT project_id, env_id, commit_id, release_name, status, created_at, target_type FROM deploy_tasks WHERE id = ?", id).
+		Scan(&projectID, &envID, &currentCommit, &releaseName, &status, &createdAt, &targetType)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "task not found"})
 		return
@@ -993,57 +1053,6 @@ func (h *APIHandler) HandleGetTaskDiff(c *gin.Context) {
 		return
 	}
 
-	// @Ref: docs/sps/plans/20260529_diff_ux_loading_plan.md | @Date: 2026-05-29
-	// 计算年月前缀以进行隔离归档
-	createdYM := "default"
-	if len(createdAt) >= 7 {
-		createdYM = strings.ReplaceAll(createdAt[:7], "-", "")
-	}
-	diffCacheDir := filepath.Join(h.config.Global.LogPath, "diffs", "projects", projectID, createdYM)
-	diffCacheFile := filepath.Join(diffCacheDir, fmt.Sprintf("task_%d_diff.log", id))
-
-	// 优先尝试读取持久化缓存
-	if data, readErr := os.ReadFile(diffCacheFile); readErr == nil {
-		contentStr := string(data)
-		var cacheObj struct {
-			Files string `json:"files"`
-			Diff  string `json:"diff"`
-		}
-		
-		if jsonErr := json.Unmarshal(data, &cacheObj); jsonErr == nil {
-			limitBytes := h.config.Global.DiffMaxSizeKB * 1024
-			diffText := cacheObj.Diff
-			if len(diffText) > limitBytes {
-				diffText = diffText[:limitBytes] + "\n\n... [DIFF OUT OF LIMIT, TRUNCATED FOR SAFETY]"
-			}
-			c.JSON(http.StatusOK, gin.H{
-				"files": cacheObj.Files,
-				"diff":  diffText,
-			})
-			return
-		}
-
-		if contentStr == "__EMPTY_DIFF__" {
-			c.JSON(http.StatusOK, gin.H{"diff": "首次部署，暂无对比基准。"})
-			return
-		}
-		if contentStr == "__DIFF_FAILED_PLACEHOLDER__" {
-			c.JSON(http.StatusOK, gin.H{"diff": "获取 diff 失败，请稍后重试"})
-			return
-		}
-		
-		limitBytes := h.config.Global.DiffMaxSizeKB * 1024
-		diffStr := contentStr
-		if len(diffStr) > limitBytes {
-			diffStr = diffStr[:limitBytes] + "\n\n... [DIFF OUT OF LIMIT, TRUNCATED FOR SAFETY]"
-		}
-		c.JSON(http.StatusOK, gin.H{
-			"files": "旧版快照，暂无列表",
-			"diff":  diffStr,
-		})
-		return
-	}
-
 	// 2. 查出同一项目同环境下在此任务之前的最近一次成功发布的 commit_id
 	querySQL := `
 		SELECT commit_id 
@@ -1055,8 +1064,6 @@ func (h *APIHandler) HandleGetTaskDiff(c *gin.Context) {
 	err = h.db.QueryRow(querySQL, projectID, envID, id).Scan(&prevCommit)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			_ = os.MkdirAll(diffCacheDir, 0755)
-			_ = os.WriteFile(diffCacheFile, []byte("__EMPTY_DIFF__"), 0644)
 			c.JSON(http.StatusOK, gin.H{"diff": "首次部署，暂无对比基准。"})
 			return
 		}
@@ -1064,42 +1071,102 @@ func (h *APIHandler) HandleGetTaskDiff(c *gin.Context) {
 		return
 	}
 
-	// 3. 确定执行 git diff 的工作目录
-	// 优先使用当次部署的克隆目录，若已被清理则降级到 workspace 中的持久仓库
-	buildPath := filepath.Join(h.config.Global.WorkspacePath, projectID, releaseName)
+	diffType := c.DefaultQuery("diff_type", "live")
+	fileParam := c.Query("file")
 
+	createdYM := "default"
+	if len(createdAt) >= 7 {
+		createdYM = strings.ReplaceAll(createdAt[:7], "-", "")
+	}
+	diffCacheDir := filepath.Join(h.config.Global.LogPath, "diffs", "projects", projectID, createdYM)
+	diffCacheFile := filepath.Join(diffCacheDir, fmt.Sprintf("task_%d_diff.log", id))
+
+	// 3. 确定执行 git diff 的工作目录
+	buildPath := filepath.Join(h.config.Global.WorkspacePath, projectID, releaseName)
 	gitRepoPath := buildPath
 	if _, statErr := os.Stat(filepath.Join(buildPath, ".git")); os.IsNotExist(statErr) {
-		// buildPath 不存在（demo 数据 / 旧发布已清理），降级：在 workspace 内递归查找该项目的 git 仓库
-		found, walkErr := findGitRepo(h.config.Global.WorkspacePath, currentCommit)
-		if walkErr != nil || found == "" {
-			c.JSON(http.StatusOK, gin.H{"diff": fmt.Sprintf(
-				"本地构建目录已被清理，且在 workspace 中未找到含目标 commit (%s) 的 git 仓库。\n请重新部署后查看 diff。",
-				currentCommit[:8],
-			)})
-			return
+		// @Ref: docs/sps/plans/20260530_fix_branch_deploy_diff_freeze_plan.md | @Date: 2026-05-30
+		// 优先使用本地项目的 bare 缓存目录，其常驻且包含完整引用，避免直接触发 walk 全局搜索
+		cacheDir := getCacheDir(projectID)
+		if _, cacheErr := os.Stat(cacheDir); cacheErr == nil {
+			gitRepoPath = cacheDir
+		} else {
+			found, walkErr := findGitRepo(h.config.Global.WorkspacePath, currentCommit)
+			if walkErr == nil && found != "" {
+				gitRepoPath = found
+			}
 		}
-		gitRepoPath = found
 	}
 
-	// git diff 执行，超时 15s（本地操作，不需要网络）
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "git", "diff", prevCommit, currentCommit)
-	cmd.Dir = gitRepoPath
+	// 4. 如果有 file 参数，只获取特定文件的单文件 diff，跳过缓存读取
+	if fileParam != "" {
+		// @Ref: docs/sps/plans/20260530_lazy_load_file_diff_plan.md | @Date: 2026-05-30
+		limitBytes := h.config.Global.DiffMaxSizeKB * 1024
+		baseCommit := prevCommit
+		if diffType == "git_log" {
+			baseCommit = currentCommit + "^"
+		}
+		var diffText string
+		var err error
+		if diffType == "live" && (targetType == "branch" || targetType == "tag") {
+			diffText = "提示：全量部署任务，未归档与线上对比快照。请在右上方切换为「本地变更 (Git Log Diff)」查看文件修改。"
+		} else {
+			diffText, err = GetDiffForFile(ctx, projectID, baseCommit, currentCommit, fileParam, limitBytes)
+			if err != nil {
+				// 降级尝试：从物理 JSON 快照中做文本正则切片提取
+				if data, readErr := os.ReadFile(diffCacheFile); readErr == nil {
+					var cacheObj struct {
+						Diff       string `json:"diff"`
+						GitLogDiff string `json:"git_log_diff"`
+					}
+					if jsonErr := json.Unmarshal(data, &cacheObj); jsonErr == nil {
+						targetFullDiff := cacheObj.Diff
+						isFullReleaseCache := false
+						if diffType == "git_log" && cacheObj.GitLogDiff != "" {
+							targetFullDiff = cacheObj.GitLogDiff
+						} else if diffType == "live" && cacheObj.Diff == "" && cacheObj.GitLogDiff != "" {
+							isFullReleaseCache = true
+						}
 
-	output, err := cmd.CombinedOutput()
-	diffStr := string(output)
-
-	if err != nil {
-		_ = os.MkdirAll(diffCacheDir, 0755)
-		_ = os.WriteFile(diffCacheFile, []byte("__DIFF_FAILED_PLACEHOLDER__"), 0644)
-		c.JSON(http.StatusOK, gin.H{"diff": fmt.Sprintf(
-			"git diff 执行失败（目录: %s）: %s\n输出: %s",
-			gitRepoPath, err.Error(), diffStr,
-		)})
+						if isFullReleaseCache {
+							diffText = "提示：全量部署任务，未归档与线上对比快照。请在右上方切换为「本地变更(Git Log Diff)」查看文件修改。"
+							err = nil
+						} else {
+							diffText = extractFileDiffFromLog(targetFullDiff, fileParam)
+							err = nil
+						}
+					}
+				}
+			}
+		}
+		if err != nil {
+			diffText = "无法获取该文件的差异对比文本。"
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"files": "",
+			"diff":  diffText,
+		})
 		return
+	}
+
+	// 5. 如果没有 file 参数，仅获取文件列表（避开全量差异读取）
+	// 优先尝试读取持久化缓存
+	if data, readErr := os.ReadFile(diffCacheFile); readErr == nil {
+		var cacheObj struct {
+			Files      string `json:"files"`
+			Diff       string `json:"diff"`
+			GitLogDiff string `json:"git_log_diff"`
+		}
+		if jsonErr := json.Unmarshal(data, &cacheObj); jsonErr == nil {
+			c.JSON(http.StatusOK, gin.H{
+				"files": cacheObj.Files,
+				"diff":  "", // 懒加载，在此处为空
+			})
+			return
+		}
 	}
 
 	// 获取变更文件状态列表 (e.g. M src/App.vue)
@@ -1112,37 +1179,38 @@ func (h *APIHandler) HandleGetTaskDiff(c *gin.Context) {
 		filesListStr = "获取变更文件列表失败"
 	}
 
-	if len(strings.TrimSpace(diffStr)) == 0 {
-		diffStr = fmt.Sprintf("两次提交内容完全相同（%s → %s），无代码变更。", prevCommit[:8], currentCommit[:8])
-	}
-
-	// 写入缓存文件（含磁盘预留检测）
+	// 写入缓存文件（仅记录文件列表，将 diff 设为空白，彻底杜绝大 diff 在硬盘和内存的无谓堆积）
 	if getFreeDiskSpaceMB(h.config.Global.LogPath) >= h.config.Global.DiskMinSpaceMB {
 		_ = os.MkdirAll(diffCacheDir, 0755)
 		cacheMap := map[string]string{
 			"files": filesListStr,
-			"diff":  diffStr,
+			"diff":  "",
 		}
 		if cacheBytes, marshalErr := json.Marshal(cacheMap); marshalErr == nil {
 			_ = os.WriteFile(diffCacheFile, cacheBytes, 0644)
 		}
 	}
 
-	// 全局限额截断
-	limitBytes := h.config.Global.DiffMaxSizeKB * 1024
-	respDiffText := diffStr
-	if len(respDiffText) > limitBytes {
-		respDiffText = respDiffText[:limitBytes] + "\n\n... [DIFF OUT OF LIMIT, TRUNCATED FOR SAFETY]"
-	}
-
 	c.JSON(http.StatusOK, gin.H{
 		"files": filesListStr,
-		"diff":  respDiffText,
+		"diff":  "",
 	})
 }
 
 // findGitRepo 在 root 目录树中递归查找包含指定 commit 的 git 仓库，返回第一个匹配路径。
 func findGitRepo(root, commit string) (string, error) {
+	// @Ref: docs/sps/plans/20260530_fix_branch_deploy_diff_freeze_plan.md | @Date: 2026-05-30
+	// 如果 commit 不是 40 位的十六进制 Commit Hash (或者是分支名、空等)，直接返回，杜绝极其耗时的全局 Walk
+	if len(commit) != 40 {
+		return "", nil
+	}
+	for i := 0; i < len(commit); i++ {
+		c := commit[i]
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			return "", nil
+		}
+	}
+
 	var result string
 	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -1165,6 +1233,54 @@ func findGitRepo(root, commit string) (string, error) {
 		return nil
 	})
 	return result, err
+}
+
+// @Ref: docs/sps/decisions/20260529_diff_ux_loading_scan.md | @Date: 2026-05-29
+// filterFilesForTruncatedDiff 在 diff 文本被字节截断后，同步裁剪 files 列表，
+// 确保"变更文件列表"与"代码差异"两个标签页展示的文件范围完全一致。
+func filterFilesForTruncatedDiff(truncatedDiff, originalFiles string) string {
+	// 从截断后的 diff 文本中提取已包含的文件路径
+	fileSet := make(map[string]bool)
+	lines := strings.Split(truncatedDiff, "\n")
+	for _, line := range lines {
+		if !strings.HasPrefix(line, "diff --git a/") {
+			continue
+		}
+		// diff --git a/path/to/file b/path/to/file
+		parts := strings.SplitN(line, " ", 4)
+		if len(parts) >= 4 {
+			file := strings.TrimPrefix(parts[2], "a/")
+			fileSet[file] = true
+		}
+	}
+
+	if len(fileSet) == 0 {
+		return originalFiles // 未提取到文件，保留原列表
+	}
+
+	// 从原 files 列表中只保留 diff 中存在的文件
+	filesLines := strings.Split(strings.TrimSpace(originalFiles), "\n")
+	var filtered []string
+	for _, line := range filesLines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		// git --name-status 输出: "M\tpath"   git --name-only 输出: "path"
+		parts := strings.SplitN(line, "\t", 2)
+		file := line
+		if len(parts) == 2 {
+			file = parts[1]
+		}
+		if fileSet[file] {
+			filtered = append(filtered, line)
+		}
+	}
+
+	if len(filtered) > 0 {
+		return strings.Join(filtered, "\n")
+	}
+	return originalFiles
 }
 
 // ComputeGithubSignature 计算 Github Webhook 签名
@@ -1438,5 +1554,46 @@ func (h *APIHandler) HandleSystemPrune(c *gin.Context) {
 		"pruned_orphans_count":  prunedOrphansCount,
 		"freed_bytes":           freedBytes,
 	})
+}
+
+// @Ref: docs/sps/plans/20260530_goal_perfect_diff_plan.md | @Date: 2026-05-30
+func isCommitHash(ref string) bool {
+	if len(ref) != 40 {
+		return false
+	}
+	for _, r := range ref {
+		if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'f') || (r >= 'A' && r <= 'F')) {
+			return false
+		}
+	}
+	return true
+}
+
+// @Ref: docs/sps/plans/20260530_goal_perfect_diff_plan.md | @Date: 2026-05-30
+func extractFileDiffFromLog(fullDiff, filePath string) string {
+	lines := strings.Split(fullDiff, "\n")
+	var result []string
+	recording := false
+	targetHeader := fmt.Sprintf("diff --git a/%s b/%s", filePath, filePath)
+	targetHeaderAlternative := fmt.Sprintf("diff --git a/%s ", filePath)
+
+	for _, line := range lines {
+		if strings.HasPrefix(line, "diff --git ") {
+			if strings.HasPrefix(line, targetHeader) || strings.Contains(line, targetHeaderAlternative) {
+				recording = true
+				result = append(result, line)
+			} else {
+				if recording {
+					break
+				}
+			}
+		} else if recording {
+			result = append(result, line)
+		}
+	}
+	if len(result) == 0 {
+		return "该文件无代码变更差异。"
+	}
+	return strings.Join(result, "\n")
 }
 

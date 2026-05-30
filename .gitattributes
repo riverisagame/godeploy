@@ -1,0 +1,5 @@
+web/dist/* linguist-generated=true -diff
+*lock.json linguist-generated=true -diff
+*.db -diff
+*.exe -diff
+godeployer_linux -diff

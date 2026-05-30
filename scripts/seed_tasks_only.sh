@@ -3,13 +3,15 @@
 # GoDeployer PHP Demo - 数据库 Seed（仅任务表）
 # =============================================
 
-DB="/mnt/d/claudeprj/deploy/demo_deployer.db"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(dirname "$SCRIPT_DIR")"
+DB="$REPO_ROOT/demo_deployer.db"
 
 echo "[步骤 3/5] 插入历史部署记录..."
 
 sqlite3 "$DB" <<'ENDSQL'
 -- 清理旧 demo 任务
-DELETE FROM deploy_tasks WHERE project_id IN ('backend-api','frontend-web');
+DELETE FROM deploy_tasks WHERE project_id IN ('thinkphp-web','webman-api','crmeb-shop');
 
 -- ============================================================
 -- ThinkPHP 项目部署历史（5条 - 真实 Gitee commits）

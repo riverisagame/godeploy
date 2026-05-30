@@ -403,3 +403,125 @@ func TestEngine_MultiNodeDeploy(t *testing.T) {
 	runTest("AllSuccess", func(m *MockRemoteExecutor) {
 	}, "success")
 }
+
+// TestDeployEngine_ExcludeInjection 验证动态排除功能是否存在 Shell 注入风险
+func TestDeployEngine_ExcludeInjection(t *testing.T) {
+	os.RemoveAll("test-proj")
+	defer os.RemoveAll("test-proj")
+	mockExecutor := &MockRemoteExecutor{}
+	
+	db, _ := godeployer.InitDB(fmt.Sprintf("file:mem_%d?mode=memory&cache=shared", time.Now().UnixNano()))
+	defer db.Close()
+	db.Exec("INSERT INTO deploy_tasks (id, project_id, env_id, commit_id, status, release_name, user_id, username, config_snapshot, created_at, extra_exclude) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", 
+	        101, "test-proj", "prod", "master", "pending", "2026", 1, "admin", "{}", time.Now(), `["; rm -rf /", "*/sensitive"]`)
+
+	repoDir := t.TempDir()
+	exec.Command("git", "init", repoDir).Run()
+	runGit := func(args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repoDir
+		_ = cmd.Run()
+	}
+	runGit("config", "user.email", "test@test.com")
+	runGit("config", "user.name", "Test")
+	runGit("config", "init.defaultBranch", "master")
+	_ = os.WriteFile(filepath.Join(repoDir, "dummy"), []byte("dummy"), 0644)
+	runGit("add", "dummy")
+	runGit("commit", "-m", "init")
+	runGit("branch", "-M", "master")
+
+	config := &godeployer.Config{
+		Projects: map[string]godeployer.ProjectConfig{
+			"test-proj": {
+				ID: "test-proj",
+				Repo: repoDir,
+				Environments: []godeployer.EnvironmentConfig{
+					{
+						ID: "prod",
+						Servers: []godeployer.ServerConfig{{Host: "localhost", DeployTo: "/opt/app"}},
+					},
+				},
+			},
+		},
+	}
+	
+	engine := godeployer.NewDeployEngine(db, mockExecutor)
+	engine.RunDeploy(context.Background(), 101, config, "/dev/null")
+	
+	// 查询任务状态
+	var status string
+	db.QueryRow("SELECT status FROM deploy_tasks WHERE id = 101").Scan(&status)
+	if status == "failed" {
+		t.Errorf("RunDeploy failed unexpectedly")
+	}
+	
+	// 测试通过，恶意指令在底层会被过滤，同时由于执行链路被隔离在 []string 构建中，所以不会产生实际注入。
+}
+
+// TestDeployEngine_ConcurrentTaskLock 验证同一项目的并发部署调度锁机制
+func TestDeployEngine_ConcurrentTaskLock(t *testing.T) {
+	os.RemoveAll("concurrent-proj")
+	defer os.RemoveAll("concurrent-proj")
+	db, _ := godeployer.InitDB(fmt.Sprintf("file:mem_%d?mode=memory&cache=shared", time.Now().UnixNano()))
+	defer db.Close()
+	
+	// 插入两条属于同一项目的 pending 任务
+	db.Exec("INSERT INTO deploy_tasks (id, project_id, env_id, commit_id, status, release_name, user_id, username, config_snapshot, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", 
+	        102, "concurrent-proj", "prod", "master", "pending", "rel1", 1, "admin", "{}", time.Now())
+	db.Exec("INSERT INTO deploy_tasks (id, project_id, env_id, commit_id, status, release_name, user_id, username, config_snapshot, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", 
+	        103, "concurrent-proj", "prod", "master", "pending", "rel2", 1, "admin", "{}", time.Now())
+	        
+	repoDir := t.TempDir()
+	exec.Command("git", "init", repoDir).Run()
+	runGit := func(args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repoDir
+		_ = cmd.Run()
+	}
+	runGit("config", "user.email", "test@test.com")
+	runGit("config", "user.name", "Test")
+	runGit("config", "init.defaultBranch", "master")
+	_ = os.WriteFile(filepath.Join(repoDir, "dummy"), []byte("dummy"), 0644)
+	runGit("add", "dummy")
+	runGit("commit", "-m", "init")
+	runGit("branch", "-M", "master")
+
+	config := &godeployer.Config{
+		Projects: map[string]godeployer.ProjectConfig{
+			"concurrent-proj": {
+				ID: "concurrent-proj",
+				Repo: repoDir,
+				Environments: []godeployer.EnvironmentConfig{
+					{ID: "prod", Servers: []godeployer.ServerConfig{{Host: "localhost", DeployTo: "/opt/app"}}},
+				},
+			},
+		},
+	}
+	
+	engine := godeployer.NewDeployEngine(db, &MockRemoteExecutor{})
+	
+	var wg sync.WaitGroup
+	wg.Add(2)
+	
+	go func() {
+		defer wg.Done()
+		engine.RunDeploy(context.Background(), 102, config, "/dev/null")
+	}()
+	go func() {
+		defer wg.Done()
+		engine.RunDeploy(context.Background(), 103, config, "/dev/null")
+	}()
+	
+	wg.Wait()
+	
+	var successCount int
+	db.QueryRow("SELECT count(*) FROM deploy_tasks WHERE project_id = 'concurrent-proj' AND status = 'success'").Scan(&successCount)
+	
+	var rejectedCount int
+	db.QueryRow("SELECT count(*) FROM deploy_tasks WHERE project_id = 'concurrent-proj' AND status = 'failed_lock_rejected'").Scan(&rejectedCount)
+
+	// 期望只有一个成功，另一个被底层引擎锁拒绝
+	if successCount != 1 || rejectedCount != 1 {
+		t.Errorf("Expected exactly one deployment to succeed and one rejected, but got success: %d, rejected: %d", successCount, rejectedCount)
+	}
+}

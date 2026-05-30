@@ -231,11 +231,107 @@ func TestAPI_JSON_ChangesCache(t *testing.T) {
 	var res map[string]interface{}
 	_ = json.Unmarshal(w.Body.Bytes(), &res)
 
-	// 断言：必须解析出了 files 和 diff 两部分
+	// 此时因为是懒加载模式，不传 file 时 diff 字段必为空
 	if res["files"] != "M src/App.vue\nA src/components/TreeView.vue" {
 		t.Errorf("expected files list match, got '%v'", res["files"])
 	}
-	if res["diff"] != "diff --git a/src/App.vue b/src/App.vue\n..." {
-		t.Errorf("expected diff text match, got '%v'", res["diff"])
+	if res["diff"] != "" {
+		t.Errorf("expected empty diff under lazy-loading mode, got '%v'", res["diff"])
+	}
+
+	// 接下来发起带 file 的请求，测试单文件正则切片懒加载提取
+	reqFile, _ := http.NewRequest("GET", "/api/tasks/501/diff?file=src/App.vue", nil)
+	reqFile.Header.Set("Authorization", "Bearer "+adminToken)
+	wFile := httptest.NewRecorder()
+	r.ServeHTTP(wFile, reqFile)
+
+	if wFile.Code != http.StatusOK {
+		t.Fatalf("expected 200 for single file diff, got %d", wFile.Code)
+	}
+
+	var resFile map[string]interface{}
+	_ = json.Unmarshal(wFile.Body.Bytes(), &resFile)
+	expectedSubDiff := "diff --git a/src/App.vue b/src/App.vue\n..."
+	if resFile["diff"] != expectedSubDiff {
+		t.Errorf("expected single file diff match, got '%v'", resFile["diff"])
+	}
+}
+
+// TestAPI_DualDiff_PersistenceAndFallback 验证全量部署在获取 Live Diff 时的友好降级提示
+func TestAPI_DualDiff_PersistenceAndFallback(t *testing.T) {
+	tmpLogDir, err := os.MkdirTemp("", "godeployer_dualdiff_")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpLogDir)
+
+	db, err := godeployer.InitDB(fmt.Sprintf("file:mem_dualdiff_%d?mode=memory&cache=shared", time.Now().UnixNano()))
+	if err != nil {
+		t.Fatalf("failed to init DB: %v", err)
+	}
+	defer db.Close()
+
+	_, _ = db.Exec(`DELETE FROM deploy_tasks`)
+	_, _ = db.Exec(`
+		INSERT INTO deploy_tasks (id, project_id, env_id, release_name, commit_id, user_id, username, status, config_snapshot, created_at, target_type)
+		VALUES (600, "test-app", "testing", "20260530110000", "aaaaaa111111", 1, "admin", "success", "{}", "2026-05-30T17:00:00Z", "branch")
+	`)
+	_, _ = db.Exec(`
+		INSERT INTO deploy_tasks (id, project_id, env_id, release_name, commit_id, user_id, username, status, config_snapshot, created_at, target_type)
+		VALUES (601, "test-app", "testing", "20260530120000", "abcdef123456", 1, "admin", "success", "{}", "2026-05-30T18:00:00Z", "branch")
+	`)
+
+	// 模拟全量部署的快照：没有 live diff ("diff": ""), 只有 git_log_diff
+	diffDir := filepath.Join(tmpLogDir, "diffs", "projects", "test-app", "202605")
+	_ = os.MkdirAll(diffDir, 0755)
+	jsonPath := filepath.Join(diffDir, "task_601_diff.log")
+
+	mockChanges := map[string]string{
+		"files":        "M src/App.vue",
+		"diff":         "", // 线上对比为空
+		"git_log_diff": "diff --git a/src/App.vue b/src/App.vue\n- old line\n+ new line",
+	}
+	jsonData, _ := json.Marshal(mockChanges)
+	_ = os.WriteFile(jsonPath, jsonData, 0644)
+
+	mockConfig := &godeployer.Config{
+		Global: godeployer.GlobalConfig{
+			JWTSecret:      "test-secret-key-12345",
+			LogPath:        tmpLogDir,
+			SSHKeyPath:     "./test_keys/id_rsa",
+			DiffMaxSizeKB:  2048,
+			DiskMinSpaceMB: 1,
+		},
+		Projects: map[string]godeployer.ProjectConfig{
+			"test-app": {ID: "test-app", Name: "Mock Test App"},
+		},
+	}
+
+	engine := godeployer.NewDeployEngine(db, nil)
+	r := godeployer.SetupRoutes(mockConfig, db, engine)
+
+	adminToken, _ := godeployer.GenerateToken("admin", "admin", "test-secret-key-12345", 5*time.Second)
+
+	// 1. 请求 diff_type = live 时的单文件 diff，应该返回降级友好提示
+	reqLive, _ := http.NewRequest("GET", "/api/tasks/601/diff?file=src/App.vue&diff_type=live", nil)
+	reqLive.Header.Set("Authorization", "Bearer "+adminToken)
+	wLive := httptest.NewRecorder()
+	r.ServeHTTP(wLive, reqLive)
+
+	if wLive.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", wLive.Code)
+	}
+	if !bytes.Contains(wLive.Body.Bytes(), []byte("全量部署任务，未归档与线上对比快照")) {
+		t.Errorf("expected fallback hint in live diff, got: %s", wLive.Body.String())
+	}
+
+	// 2. 请求 diff_type = git_log 时的单文件 diff，应该能正常解析并返回对应的变更
+	reqLog, _ := http.NewRequest("GET", "/api/tasks/601/diff?file=src/App.vue&diff_type=git_log", nil)
+	reqLog.Header.Set("Authorization", "Bearer "+adminToken)
+	wLog := httptest.NewRecorder()
+	r.ServeHTTP(wLog, reqLog)
+
+	if !bytes.Contains(wLog.Body.Bytes(), []byte("new line")) {
+		t.Errorf("expected actual git log diff, got: %s", wLog.Body.String())
 	}
 }

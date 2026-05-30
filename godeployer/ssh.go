@@ -89,7 +89,7 @@ func (s *SSHExecutor) RunCommand(cmd string) (string, error) {
 func (s *SSHExecutor) Rsync(local, remote string, linkDest string) error {
 	// 拼接本地 rsync 命令。在 Linux/WSL/MacOS 环境下可用，在 Windows 平台需要安装并配置 rsync。
 	// --link-dest 需要传入目标机相对于 releases/new_release 目录的相对路径，或者绝对路径。
-	sshCmd := fmt.Sprintf("ssh -p %d -i %s", s.Server.Port, s.Server.SSHKeyPath)
+	sshCmd := fmt.Sprintf("ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p %d -i %s", s.Server.Port, s.Server.SSHKeyPath)
 	
 	args := []string{
 		"-rlptz",

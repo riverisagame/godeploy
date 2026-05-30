@@ -1,76 +1,62 @@
-/**
- * Login.spec.ts
- * Login 组件渲染测试 - 验证关键 DOM 结构与交互元素存在
- * @Ref: docs/sps/plans/20260527_m7_frontend_test_ir.md | @Date: 2026-05-27
- * 
- * 物理零污染：Mock axios，不产生任何真实 HTTP 请求
- */
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { mount } from '@vue/test-utils'
-import { createRouter, createMemoryHistory } from 'vue-router'
-import Login from '@/views/Login.vue'
+import { mount } from '@vue/test-utils';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import Login from '../views/Login.vue';
+import axios from 'axios';
+import { useRouter } from 'vue-router';
+import ElementPlus from 'element-plus';
 
-// Mock axios 防止真实网络请求
-vi.mock('axios', () => ({
-  default: {
-    post: vi.fn(),
-    defaults: { headers: { common: {} } },
-  },
-}))
+// 严格 Mock，实现零污染
+vi.mock('axios');
+vi.mock('vue-router', () => ({
+  useRouter: vi.fn()
+}));
 
-// Mock Element Plus，但必须保留 default export
-vi.mock('element-plus', async (importOriginal) => {
-  const actual = await importOriginal<any>()
-  return {
-    ...actual,
-    ElMessage: { success: vi.fn(), error: vi.fn() },
-  }
-})
+describe('Login.vue Component UI Test', () => {
+  const mockPush = vi.fn();
 
-const router = createRouter({
-  history: createMemoryHistory(),
-  routes: [
-    { path: '/', component: { template: '<div>Dashboard</div>' } },
-    { path: '/login', component: Login },
-  ],
-})
-
-import ElementPlus from 'element-plus'
-
-describe('Login 组件渲染测试', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
-  })
+    vi.clearAllMocks();
+    (useRouter as any).mockReturnValue({
+      push: mockPush
+    });
+  });
 
-  it('应渲染 GoDeployer 标题', async () => {
+  it('1. 阻止空表单提交: 点击登录按钮但不输入时，不应当调用 API', async () => {
     const wrapper = mount(Login, {
-      global: { plugins: [router, ElementPlus] },
-    })
-    expect(wrapper.text()).toContain('GoDeployer')
-  })
+      global: { plugins: [ElementPlus] }
+    });
+    // 查找包含“登录”文字的按钮并触发点击
+    const btn = wrapper.find('button');
+    await btn.trigger('click');
+    
+    // axios.post 不应该被调用，因为表单验证拦截了
+    expect(axios.post).not.toHaveBeenCalled();
+  });
 
-  it('应包含用户名输入框', async () => {
+  it('2. 正确填写后点击能够触发后端接口跳转', async () => {
+    (axios.post as any).mockResolvedValueOnce({ data: { token: 'mock-token' } });
     const wrapper = mount(Login, {
-      global: { plugins: [router, ElementPlus] },
-    })
-    // el-input 内部有真实的 input 元素
-    const inputs = wrapper.findAll('input')
-    expect(inputs.length).toBeGreaterThanOrEqual(1)
-  })
+      global: { plugins: [ElementPlus] }
+    });
 
-  it('应包含登录按钮', async () => {
-    const wrapper = mount(Login, {
-      global: { plugins: [router, ElementPlus] },
-    })
-    const btn = wrapper.find('button')
-    expect(btn.exists()).toBe(true)
-    expect(btn.text()).toContain('登录')
-  })
+    // 设置合法账号密码
+    await wrapper.find('input[type="text"]').setValue('admin');
+    await wrapper.find('input[type="password"]').setValue('admin123');
 
-  it('应包含系统副标题描述', async () => {
-    const wrapper = mount(Login, {
-      global: { plugins: [router, ElementPlus] },
-    })
-    expect(wrapper.text()).toContain('配置驱动多项目多环境代码发布系统')
-  })
-})
+    // 触发登录
+    const btn = wrapper.find('button');
+    await btn.trigger('click');
+
+    // 由于 element-plus form validate 是异步的，需要等待 nextTick 或 flushPromises
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    // 断言 axios 成功触发
+    expect(axios.post).toHaveBeenCalledWith('/api/login', {
+      username: 'admin',
+      password: 'admin123'
+    });
+
+    // 验证 router 是否发生了跳转
+    expect(mockPush).toHaveBeenCalledWith('/');
+  });
+});

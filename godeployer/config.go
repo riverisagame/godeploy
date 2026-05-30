@@ -21,6 +21,11 @@ type GlobalConfig struct {
 	SSHKeyPath    string `yaml:"ssh_key_path"`
 	ServerPort    int    `yaml:"server_port"`
 	JWTSecret     string `yaml:"jwt_secret"`
+	// @Ref: docs/sps/plans/20260529_diff_ux_loading_plan.md | @Date: 2026-05-29
+	DiffMaxSizeKB  int `yaml:"diff_max_size_kb"`
+	DiskMinSpaceMB int `yaml:"disk_min_space_mb"`
+	TaskRetainMax  int `yaml:"task_retain_max"`
+	TaskRetainDays int `yaml:"task_retain_days"`
 }
 
 type ProjectConfig struct {
@@ -89,6 +94,13 @@ func LoadConfig(path string) (*Config, error) {
 					expandedProjData := []byte(os.ExpandEnv(string(projData)))
 					var projConfig ProjectConfig
 					if err := yaml.Unmarshal(expandedProjData, &projConfig); err == nil && projConfig.ID != "" {
+						for envIdx := range projConfig.Environments {
+							for srvIdx := range projConfig.Environments[envIdx].Servers {
+								if projConfig.Environments[envIdx].Servers[srvIdx].SSHKeyPath == "" {
+									projConfig.Environments[envIdx].Servers[srvIdx].SSHKeyPath = config.Global.SSHKeyPath
+								}
+							}
+						}
 						config.Projects[projConfig.ID] = projConfig
 					}
 				}

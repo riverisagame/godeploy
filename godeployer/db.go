@@ -76,6 +76,65 @@ func InitDB(dsn string) (*sql.DB, error) {
 
 	DB = db
 
+	// @Ref: docs/sps/plans/20260529_deploy_enhancements_plan.md | @Date: 2026-05-29
+	// 平滑升级：检查 deploy_tasks 字段是否存在，不存在则动态添加
+	var hasDescription, hasExtraExclude bool
+	rows, err := db.Query("PRAGMA table_info(deploy_tasks)")
+	if err == nil {
+		for rows.Next() {
+			var cid int
+			var name, dType string
+			var notnull, pk int
+			var dfltValNull sql.NullString
+			if err := rows.Scan(&cid, &name, &dType, &notnull, &dfltValNull, &pk); err == nil {
+				if name == "description" {
+					hasDescription = true
+				}
+				if name == "extra_exclude" {
+					hasExtraExclude = true
+				}
+			}
+		}
+		rows.Close()
+	}
+
+	if !hasDescription {
+		if _, err := db.Exec("ALTER TABLE deploy_tasks ADD COLUMN description TEXT DEFAULT ''"); err != nil {
+			db.Close()
+			return nil, fmt.Errorf("failed to add description column: %w", err)
+		}
+	}
+	if !hasExtraExclude {
+		if _, err := db.Exec("ALTER TABLE deploy_tasks ADD COLUMN extra_exclude TEXT DEFAULT ''"); err != nil {
+			db.Close()
+			return nil, fmt.Errorf("failed to add extra_exclude column: %w", err)
+		}
+	}
+
+	// @Ref: docs/sps/plans/20260530_goal_perfect_diff_plan.md | @Date: 2026-05-30
+	var hasTargetType bool
+	rows2, err := db.Query("PRAGMA table_info(deploy_tasks)")
+	if err == nil {
+		for rows2.Next() {
+			var cid int
+			var name, dType string
+			var notnull, pk int
+			var dfltValNull sql.NullString
+			if err := rows2.Scan(&cid, &name, &dType, &notnull, &dfltValNull, &pk); err == nil {
+				if name == "target_type" {
+					hasTargetType = true
+				}
+			}
+		}
+		rows2.Close()
+	}
+	if !hasTargetType {
+		if _, err := db.Exec("ALTER TABLE deploy_tasks ADD COLUMN target_type TEXT DEFAULT ''"); err != nil {
+			db.Close()
+			return nil, fmt.Errorf("failed to add target_type column: %w", err)
+		}
+	}
+
 	// 自动创建默认管理员
 	if err := createDefaultAdmin(db); err != nil {
 		db.Close()

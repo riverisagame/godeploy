@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -32,7 +34,14 @@ func NewSSHPool(server ServerConfig, maxConns int) *SSHPool {
 }
 
 func (p *SSHPool) createClient() (*ssh.Client, error) {
-	key, err := os.ReadFile(p.server.SSHKeyPath)
+	path := p.server.SSHKeyPath
+	if strings.HasPrefix(path, "~") {
+		if home, err := os.UserHomeDir(); err == nil {
+			path = filepath.Join(home, path[1:])
+		}
+	}
+
+	key, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read private key: %w", err)
 	}

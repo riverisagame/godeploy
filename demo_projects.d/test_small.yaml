@@ -1,0 +1,15 @@
+id: "test-small-proj"
+name: "Test Small Proj"
+repo: "https://github.com/octocat/Hello-World.git"
+exclude:
+  - ".git"
+environments:
+  - id: "prod"
+    name: "Production"
+    default_branch: "master"
+    keep_releases: 3
+    servers:
+      - host: "localhost"
+        port: 0
+        user: "dan"
+        deploy_to: "test_demo_src"

@@ -4,8 +4,10 @@
 # 为每个历史任务创建对应的 .log 文件
 # =============================================
 
-DB="/mnt/d/claudeprj/deploy/demo_deployer.db"
-LOG_DIR="/mnt/d/claudeprj/deploy/demo_logs"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(dirname "$SCRIPT_DIR")"
+DB="$REPO_ROOT/demo_deployer.db"
+LOG_DIR="$REPO_ROOT/demo_logs"
 
 mkdir -p "$LOG_DIR"
 
