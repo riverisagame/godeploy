@@ -5,6 +5,12 @@
 /godeployer.exe
 /godeployer_linux
 godeployer/godeployer_linux
+/deploy.exe
+/godeployer_bin
+/godeployer_bin.exe
+/deploy_temp.exe
+/godeployer_demo_bin
+/godeployer_demo_bin.exe
 
 # 前端依赖与构建产物
 web/node_modules/
@@ -19,6 +25,7 @@ godeployer/test_logs/
 godeployer/test_workspace/
 godeployer/test_workspace_atomic/
 godeployer/test_mock_dir/
+godeployer/application/diffs/
 
 # 运行时日志
 *.log
@@ -26,6 +33,7 @@ godeployer/test_mock_dir/
 # IDE 配置
 .idea/
 .vscode/
+.zed/
 
 build/
 
@@ -46,6 +54,10 @@ demo_workspace/gitee_demo/
 demo_workspace/backend-api/
 demo_workspace/frontend-web/
 
+# 所有的 demo 临时空间
+/demo_workspace/
+/godeployer/demo_workspace/
+
 # 临时测试文件
 payload.json
 test_api.js
@@ -54,52 +66,7 @@ test_hash.go
 seed.sql
 seed_demo.go
 web/test_ui.cjs
-web/screenshot1_dashboard.png
-
-# 代码覆盖率报告
-coverage/
-
-# 编译二进制
-/godeployer_bin
-/godeployer_bin.exe
-
-# 所有的 demo 临时空间
-/demo_workspace/
-/godeployer/demo_workspace/
-
-# 各种截图
-*.png
-web/*.png
-
-# 编译出的测试二进制
-/deploy_temp.exe
-/godeployer_demo_bin
-/godeployer_demo_bin.exe
-
-# 临时测试文件
-/test_api.py
-/test_clone/
-/projects.json
-/token.json
-
-# 编译二进制
-/godeployer_bin
-/godeployer_bin.exe
-
-# 所有的 demo 临时空间
-/demo_workspace/
-/godeployer/demo_workspace/
-
-# 各种截图
-*.png
-web/*.png
-
-# 编译出的测试二进制
-/deploy_temp.exe
-/godeployer_demo_bin
-/godeployer_demo_bin.exe
-
-# 临时测试文件
+web/test_deploy_e2e.js
 /test_api.py
 /test_clone/
 /projects.json
@@ -107,14 +74,23 @@ web/*.png
 /test_mock_ssh.sh
 /web/test.cjs
 
+# 代码覆盖率报告
+coverage/
+
+# 各种截图
+*.png
+web/*.png
+
 # 嵌入前端的临时目录
 /godeployer/dist/
 
 # 自动化测试报告
 /web/playwright-report/
+/web/test-results/
 
 # 额外的忽略目录
 .gitnexus/
+.omc/
 e2el/
 log/
 venv/
