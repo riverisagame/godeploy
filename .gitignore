@@ -26,6 +26,9 @@ godeployer/test_workspace/
 godeployer/test_workspace_atomic/
 godeployer/test_mock_dir/
 godeployer/application/diffs/
+godeployer/application/concurrent-proj/
+godeployer/application/proj-multi/
+godeployer/application/test-proj/
 
 # 运行时日志
 *.log
@@ -90,7 +93,6 @@ web/*.png
 
 # 额外的忽略目录
 .gitnexus/
-.omc/
 e2el/
 log/
 venv/
