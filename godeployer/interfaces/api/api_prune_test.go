@@ -94,7 +94,7 @@ func TestAPI_SystemPrune_OrphanCleanup(t *testing.T) {
 		},
 	}
 
-	engine := application.NewDeployEngine(taskRepo, nil)
+	engine := application.NewDeployEngine(taskRepo, nil, nil)
 	r := SetupRoutes(mockConfig, db, taskRepo, engine)
 
 	req, _ := http.NewRequest("POST", "/api/system/prune", nil)
@@ -189,7 +189,7 @@ func TestAPI_DiffCache_MaxSizeLimit(t *testing.T) {
 		},
 	}
 
-	engine := application.NewDeployEngine(taskRepo, nil)
+	engine := application.NewDeployEngine(taskRepo, nil, nil)
 	r := SetupRoutes(mockConfig, db, taskRepo, engine)
 
 	req, _ := http.NewRequest("GET", "/api/tasks/201/diff", nil)

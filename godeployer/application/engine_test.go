@@ -15,7 +15,7 @@ import (
 	"time"
 )
 
-// MockRemoteExecutor 用于捕获和验证发往目标服务器的 SSH 和 Rsync 指令。
+// MockRemoteExecutor 实现 domain.NodeExecutor，用于捕获和验证 SSH/Rsync 指令。
 type MockRemoteExecutor struct {
 	mu                 sync.Mutex
 	commandsRun        []string
@@ -26,32 +26,34 @@ type MockRemoteExecutor struct {
 	FailCount          int
 }
 
-func (m *MockRemoteExecutor) RunCommand(cmd string) (string, error) {
+func (m *MockRemoteExecutor) RunCommand(_ context.Context, _ domain.ServerConfig, cmd string) (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-
-	// 模拟 symlink 或 回滚失败
-	if strings.Contains(cmd, "ln -sfn") || strings.Contains(cmd, "mv -Tf") {
-		isRollback := strings.Contains(cmd, "20260101000000")
-		if m.ShouldFailSymlink && !isRollback {
-			m.FailCount++
-			return "", fmt.Errorf("mock symlink error")
-		}
-		// 模拟回滚命令（回滚通常也是 ln -sfn 以前的 release）
-		if m.ShouldFailRollback {
-			return "", fmt.Errorf("mock rollback error")
-		}
-	}
-
 	m.commandsRun = append(m.commandsRun, cmd)
 	return "mocked stdout", nil
+}
+
+func (m *MockRemoteExecutor) SwitchSymlink(_ context.Context, _ domain.ServerConfig, releaseName string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	isRollback := strings.Contains(releaseName, "20260101000000")
+	cmd := fmt.Sprintf("ln -sfn releases/%s current_temp && mv -Tf current_temp current", releaseName)
+	m.commandsRun = append(m.commandsRun, cmd)
+	if m.ShouldFailSymlink && !isRollback {
+		m.FailCount++
+		return fmt.Errorf("mock symlink error")
+	}
+	if m.ShouldFailRollback && isRollback {
+		return fmt.Errorf("mock rollback error")
+	}
+	return nil
 }
 
 func (m *MockRemoteExecutor) Close() error {
 	return nil
 }
 
-func (m *MockRemoteExecutor) Rsync(local, remote string, linkDest string) error {
+func (m *MockRemoteExecutor) Rsync(_ context.Context, _ domain.ServerConfig, local, remote, linkDest string, _ []string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.ShouldFailRsync {
@@ -78,6 +80,9 @@ func (m *MockRemoteExecutor) GetRsyncArgs() []string {
 	return copied
 }
 
+// compile-time check
+var _ domain.NodeExecutor = (*MockRemoteExecutor)(nil)
+
 // TestEngine_LocalBuildVerify 验证本地构建脚本是否能够正确按序执行。
 func TestEngine_LocalBuildVerify(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "godeployer-build-*")
@@ -98,7 +103,7 @@ func TestEngine_LocalBuildVerify(t *testing.T) {
 		},
 	}
 
-	engine := NewDeployEngine(nil, nil)
+	engine := NewDeployEngine(nil, nil, nil)
 	err = engine.RunLocalBuild(context.Background(), proj, tmpDir)
 	if err != nil {
 		t.Fatalf("RunLocalBuild failed: %v", err)
@@ -114,7 +119,7 @@ func TestEngine_LocalBuildVerify(t *testing.T) {
 // 必须满足：先使用 ln -sfn 建立临时链接，再用 mv -Tf 原子覆盖。
 func TestEngine_AtomicSymlinkVerify(t *testing.T) {
 	mockExecutor := &MockRemoteExecutor{}
-	engine := NewDeployEngine(nil, mockExecutor)
+	engine := NewDeployEngine(nil, mockExecutor, nil)
 
 	server := domain.ServerConfig{
 		Host:     "localhost",
@@ -166,7 +171,7 @@ func TestEngine_RollbackVerify(t *testing.T) {
 	}
 
 	mockExecutor := &MockRemoteExecutor{}
-	engine := NewDeployEngine(taskRepo, mockExecutor)
+	engine := NewDeployEngine(taskRepo, mockExecutor, nil)
 
 	server := domain.ServerConfig{
 		Host:     "localhost",
@@ -223,7 +228,7 @@ func TestEngine_DeployTimeout(t *testing.T) {
 		},
 	}
 
-	engine := NewDeployEngine(nil, nil)
+	engine := NewDeployEngine(nil, nil, nil)
 
 	// 设定 100ms 超时
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
@@ -245,7 +250,7 @@ func TestEngine_DeployTimeout(t *testing.T) {
 // TestEngine_Scheduler_ConcurrencyLimit 测试部署队列的防洪保护机制
 // @Ref: docs/sps/plans/20260527_m4_scheduler_ir.md
 func TestEngine_Scheduler_ConcurrencyLimit(t *testing.T) {
-	engine := NewDeployEngine(nil, nil)
+	engine := NewDeployEngine(nil, nil, nil)
 
 	// 不启动 Dispatcher，直接塞满队列（假定容量为 50）
 	successCount := 0
@@ -280,7 +285,7 @@ func TestEngine_Scheduler_GracefulShutdown(t *testing.T) {
 	db, taskRepo, _ := db.InitTestDB(fmt.Sprintf("file:mem_%d?mode=memory&cache=shared", time.Now().UnixNano()))
 	defer db.Close()
 
-	engine := NewDeployEngine(taskRepo, &MockRemoteExecutor{})
+	engine := NewDeployEngine(taskRepo, &MockRemoteExecutor{}, nil)
 
 	// Submit 1 个简单的 Job，等待调度执行完成
 	_ = engine.SubmitJob(&domain.DeployJob{
@@ -362,7 +367,7 @@ func TestEngine_MultiNodeDeploy(t *testing.T) {
 		},
 	}
 
-	runTest := func(name string, setupMock func(m *MockRemoteExecutor), expectedStatus string) {
+	runTest := func(name string, setupMock func(m *MockRemoteExecutor), expectedStatus domain.DeployStatus) {
 		t.Run(name, func(t *testing.T) {
 			os.RemoveAll("proj-multi")
 			defer os.RemoveAll("proj-multi")
@@ -370,38 +375,34 @@ func TestEngine_MultiNodeDeploy(t *testing.T) {
 
 			mockExecutor := &MockRemoteExecutor{}
 			setupMock(mockExecutor)
-			engine := NewDeployEngine(taskRepo, mockExecutor)
+			engine := NewDeployEngine(taskRepo, mockExecutor, nil)
 
 			engine.RunDeploy(context.Background(), taskID, config, "/dev/null")
 
 			var status string
 			_ = db.QueryRow("SELECT status FROM deploy_tasks WHERE id = ?", taskID).Scan(&status)
 
-			if status != expectedStatus {
+			if status != string(expectedStatus) {
 				t.Errorf("expected status %s, got %s", expectedStatus, status)
 			}
 		})
 	}
 
-	// 场景 1: Rsync 阶段失败，应直接标记 failed，不触发回滚
 	runTest("RsyncFail", func(m *MockRemoteExecutor) {
 		m.ShouldFailRsync = true
-	}, "failed")
+	}, domain.StatusFailed)
 
-	// 场景 2: Symlink 阶段失败，应触发回滚，回滚成功后标记 failed
 	runTest("SymlinkFail_RollbackSuccess", func(m *MockRemoteExecutor) {
 		m.ShouldFailSymlink = true
-	}, "failed")
+	}, domain.StatusFailed)
 
-	// 场景 3: Symlink 阶段失败，且回滚也失败，应标记为 critical_brain_split
 	runTest("SymlinkFail_RollbackFail_BrainSplit", func(m *MockRemoteExecutor) {
 		m.ShouldFailSymlink = true
 		m.ShouldFailRollback = true
-	}, "critical_brain_split")
+	}, domain.StatusCriticalBrainSplit)
 
-	// 场景 4: 全部成功
 	runTest("AllSuccess", func(m *MockRemoteExecutor) {
-	}, "success")
+	}, domain.StatusSuccess)
 }
 
 // TestDeployEngine_ExcludeInjection 验证动态排除功能是否存在 Shell 注入风险
@@ -445,13 +446,13 @@ func TestDeployEngine_ExcludeInjection(t *testing.T) {
 		},
 	}
 
-	engine := NewDeployEngine(taskRepo, mockExecutor)
+	engine := NewDeployEngine(taskRepo, mockExecutor, nil)
 	engine.RunDeploy(context.Background(), 101, config, "/dev/null")
 
 	// 查询任务状态
 	var status string
 	db.QueryRow("SELECT status FROM deploy_tasks WHERE id = 101").Scan(&status)
-	if status == "failed" {
+	if status == string(domain.StatusFailed) {
 		t.Errorf("RunDeploy failed unexpectedly")
 	}
 
@@ -498,7 +499,7 @@ func TestDeployEngine_ConcurrentTaskLock(t *testing.T) {
 		},
 	}
 
-	engine := NewDeployEngine(taskRepo, &MockRemoteExecutor{})
+	engine := NewDeployEngine(taskRepo, &MockRemoteExecutor{}, nil)
 
 	var wg sync.WaitGroup
 	wg.Add(2)

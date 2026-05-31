@@ -48,23 +48,23 @@ func (r *taskRepository) DeleteTasks(ids []int) error {
 	return r.db.Where("id IN ?", ids).Delete(&domain.DeployTask{}).Error
 }
 
-func (r *taskRepository) UpdateTaskStatus(id int, status string) error {
-	return r.db.Model(&domain.DeployTask{}).Where("id = ?", id).Update("status", status).Error
+func (r *taskRepository) UpdateTaskStatus(id int, status domain.DeployStatus) error {
+	return r.db.Model(&domain.DeployTask{}).Where("id = ?", id).Update("status", string(status)).Error
 }
 
 func (r *taskRepository) GetStalledTasks() ([]domain.DeployTask, error) {
 	var tasks []domain.DeployTask
-	if err := r.db.Where("status IN ?", []string{"pending", "deploying"}).Find(&tasks).Error; err != nil {
+	if err := r.db.Where("status IN ?", []domain.DeployStatus{domain.StatusPending, domain.StatusDeploying}).Find(&tasks).Error; err != nil {
 		return nil, err
 	}
 	return tasks, nil
 }
 
-func (r *taskRepository) UpdateTaskStatusBatch(ids []int, status string) error {
+func (r *taskRepository) UpdateTaskStatusBatch(ids []int, status domain.DeployStatus) error {
 	if len(ids) == 0 {
 		return nil
 	}
-	return r.db.Model(&domain.DeployTask{}).Where("id IN ?", ids).Update("status", status).Error
+	return r.db.Model(&domain.DeployTask{}).Where("id IN ?", ids).Update("status", string(status)).Error
 }
 
 func (r *taskRepository) CountTasksByEnv(projectID, envID string) (int, error) {

@@ -57,7 +57,7 @@ func TestAPI_DiffSemaphoreThrottling(t *testing.T) {
 		},
 	}
 
-	engine := application.NewDeployEngine(taskRepo, nil)
+	engine := application.NewDeployEngine(taskRepo, nil, nil)
 	r := SetupRoutes(cfg, db, taskRepo, engine)
 
 	adminToken, _ := application.GenerateToken("admin", "admin", "sem-secret-key-12345", 5*time.Second)

@@ -1,4 +1,5 @@
-package godeployer
+// Package config 提供 YAML 配置文件的加载与解析能力。
+package config
 
 import (
 	"fmt"

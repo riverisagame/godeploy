@@ -99,3 +99,4 @@
 | 2026-05-30 | TASK-002 | 架构 | docs/sps/plans/001-ddd-refactor-plan.md | 已起草，等待核对 |
 | 2026-05-30 | goal_multi_db | domain/infrastructure | docs/sps/plans/20260530_goal_multi_db_plan.md | IN_PROGRESS |
 | 2026-05-31 | CI-FIX | web/tests | docs/sps/plans/20260531_fix_github_action_ci.md | BUILD_SUCCESS |
+| 2026-05-31 | DDD-001 | ARCH_DDD | docs/sps/plans/20260531-ddd-full-tactical-plan.md | BUILD_SUCCESS |

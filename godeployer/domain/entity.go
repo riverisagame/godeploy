@@ -1,7 +1,7 @@
 package domain
-
 import (
 	"context"
+	"errors"
 	"time"
 )
 
@@ -12,6 +12,28 @@ type DeployJob struct {
 	TaskID      int64
 	Config      *Config
 	LogFilePath string
+}
+
+// NewDeployJob 创建部署任务实体，初始化 Context 和 CancelFunc。
+func NewDeployJob(taskID int64, config *Config, logFilePath string) *DeployJob {
+	ctx, cancel := context.WithCancel(context.Background())
+	return &DeployJob{
+		Ctx:         ctx,
+		Cancel:      cancel,
+		TaskID:      taskID,
+		Config:      config,
+		LogFilePath: logFilePath,
+	}
+}
+
+// IsCancelled 判断任务是否已被取消。
+func (j *DeployJob) IsCancelled() bool {
+	select {
+	case <-j.Ctx.Done():
+		return true
+	default:
+		return false
+	}
 }
 
 // Config 配置相关的实体
@@ -100,7 +122,7 @@ type DeployTask struct {
 	ProjectID      string    `json:"project_id" gorm:"not null;index"`
 	EnvID          string    `json:"env_id" gorm:"not null;index"`
 	CommitID       string    `json:"commit_id" gorm:"not null"`
-	Status         string    `json:"status" gorm:"not null;index"`
+	Status         DeployStatus `json:"status" gorm:"not null;index"`
 	ReleaseName    string    `json:"release_name" gorm:"not null"`
 	UserID         int       `json:"user_id" gorm:"not null"`
 	Username       string    `json:"username" gorm:"not null"`
@@ -113,4 +135,48 @@ type DeployTask struct {
 
 func (DeployTask) TableName() string {
 	return "deploy_tasks"
+}
+
+// ErrInvalidTransition 状态转换非法时返回。
+var ErrInvalidTransition = errors.New("deploy task: invalid status transition")
+
+// Start 将任务从 pending 切换到 deploying，其余状态下调用返回 ErrInvalidTransition。
+func (t *DeployTask) Start() error {
+	if t.Status != StatusPending {
+		return ErrInvalidTransition
+	}
+	t.Status = StatusDeploying
+	return nil
+}
+
+// Complete 将任务从 deploying 切换到 success，其余状态下调用返回 ErrInvalidTransition。
+func (t *DeployTask) Complete() error {
+	if t.Status != StatusDeploying {
+		return ErrInvalidTransition
+	}
+	t.Status = StatusSuccess
+	return nil
+}
+
+// Fail 将任务从 deploying 切换到 failed，其余状态下调用返回 ErrInvalidTransition。
+func (t *DeployTask) Fail() error {
+	if t.Status != StatusDeploying {
+		return ErrInvalidTransition
+	}
+	t.Status = StatusFailed
+	return nil
+}
+
+// Abort 将任务从 pending 或 deploying 切换到 aborted，其余状态下调用返回 ErrInvalidTransition。
+func (t *DeployTask) Abort() error {
+	if t.Status != StatusPending && t.Status != StatusDeploying {
+		return ErrInvalidTransition
+	}
+	t.Status = StatusAborted
+	return nil
+}
+
+// IsActive 判断任务是否处于活跃状态（pending 或 deploying）。
+func (t *DeployTask) IsActive() bool {
+	return t.Status == StatusPending || t.Status == StatusDeploying
 }

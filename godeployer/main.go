@@ -4,8 +4,10 @@ import (
 	"deploy/godeployer/application"
 	"deploy/godeployer/domain"
 	"deploy/godeployer/infrastructure/notifier"
+	"deploy/godeployer/infrastructure/ssh"
 	"deploy/godeployer/infrastructure/db"
 	"deploy/godeployer/interfaces/api"
+	"deploy/godeployer/infrastructure/config"
 
 	"context"
 	"database/sql"
@@ -34,12 +36,11 @@ func GetEmbeddedAsset(path string) ([]byte, error) {
 
 // BootstrapApp 提供集成化的配置加载与数据库初始化引导。
 func BootstrapApp(configPath string) (*domain.Config, *sql.DB, domain.TaskRepository, error) {
-	config, err := LoadConfig(configPath)
+	cfg, err := config.LoadConfig(configPath)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("failed to load config: %w", err)
 	}
-
-	gormDB, err := db.InitGORM("sqlite", config.Global.SQLitePath)
+	gormDB, err := db.InitGORM("sqlite", cfg.Global.SQLitePath)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("failed to initialize db: %w", err)
 	}
@@ -50,8 +51,7 @@ func BootstrapApp(configPath string) (*domain.Config, *sql.DB, domain.TaskReposi
 	}
 
 	taskRepo := db.NewTaskRepository(gormDB)
-
-	return config, sqlDB, taskRepo, nil
+	return cfg, sqlDB, taskRepo, nil
 }
 
 // SetupStaticEmbed 挂载前端静态资源并提供 SPA Fallback 机制。
@@ -113,8 +113,10 @@ func StartServer() {
 	bus := notifier.NewEventBus()
 	bus.StartEventConsumer(10)
 
-	// 实例化部署引擎并启动 Dispatcher (最大并发 3)
-	engine := application.NewDeployEngine(taskRepo, nil)
+	// 创建领域服务并注入部署引擎
+	nodeAdapter := ssh.NewNodeAdapter()
+	deploySvc := domain.NewDeploymentService(taskRepo)
+	engine := application.NewDeployEngine(taskRepo, nodeAdapter, deploySvc)
 	engine.StartDispatcher(3)
 
 	// 创建路由

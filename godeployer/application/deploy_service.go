@@ -1,7 +1,6 @@
 package application
 
 import (
-	"bytes"
 	"context"
 	"deploy/godeployer/infrastructure/git"
 	"deploy/godeployer/infrastructure/sys"
@@ -29,8 +28,9 @@ var (
 // DeployJob is now domain.DeployJob
 
 type DeployEngine struct {
-	taskRepo domain.TaskRepository
-	executor ssh.RemoteExecutor
+	taskRepo  domain.TaskRepository
+	executor  domain.NodeExecutor
+	deploySvc *domain.DeploymentService // @Ref: docs/sps/specs/20260531-ddd-full-tactical-design.md | @Date: 2026-05-31
 
 	pools  map[string]*ssh.SSHPool
 	poolMu sync.Mutex
@@ -43,12 +43,13 @@ type DeployEngine struct {
 	projectLocks sync.Map
 }
 
-func NewDeployEngine(taskRepo domain.TaskRepository, executor ssh.RemoteExecutor) *DeployEngine {
+func NewDeployEngine(taskRepo domain.TaskRepository, executor domain.NodeExecutor, deploySvc *domain.DeploymentService) *DeployEngine {
 	return &DeployEngine{
-		taskRepo: taskRepo,
-		executor: executor,
-		queue:    make(chan *domain.DeployJob, 50),
-		pools:    make(map[string]*ssh.SSHPool),
+		taskRepo:  taskRepo,
+		executor:  executor,
+		deploySvc: deploySvc,
+		queue:     make(chan *domain.DeployJob, 50),
+		pools:     make(map[string]*ssh.SSHPool),
 	}
 }
 
@@ -91,24 +92,12 @@ func (e *DeployEngine) RunLocalBuild(ctx context.Context, proj domain.ProjectCon
 }
 
 // SwitchSymlink 对目标服务器执行无空窗期的原子软链接切换。
+// SwitchSymlink 对目标服务器执行无空窗期的原子软链接切换。
 func (e *DeployEngine) SwitchSymlink(server domain.ServerConfig, releaseName string) error {
-	executor := e.executor
-	if executor == nil {
-		executor = ssh.NewSSHExecutor(server, e.getPool(server))
+	if e.executor == nil {
+		return fmt.Errorf("node executor is not initialized")
 	}
-
-	releasesDir := filepath.ToSlash(filepath.Join(server.DeployTo, "releases"))
-	newReleasePath := filepath.ToSlash(filepath.Join(releasesDir, releaseName))
-	tempSymlinkPath := filepath.ToSlash(filepath.Join(server.DeployTo, "current_temp"))
-	currentSymlinkPath := filepath.ToSlash(filepath.Join(server.DeployTo, "current"))
-
-	// 1 & 2. 创建临时软链接并原子重命名覆盖 current 链接
-	linkCmd := fmt.Sprintf("ln -sfn %s %s && mv -Tf %s %s", newReleasePath, tempSymlinkPath, tempSymlinkPath, currentSymlinkPath)
-	if _, err := executor.RunCommand(linkCmd); err != nil {
-		return fmt.Errorf("failed to create temporary symlink: %w", err)
-	}
-
-	return nil
+	return e.executor.SwitchSymlink(context.Background(), server, releaseName)
 }
 
 // RunRollbackToTask 将指定项目和环境的目标服务器回滚到指定的任务 ID 对应的 Release 版本。
@@ -122,7 +111,7 @@ func (e *DeployEngine) RunRollbackToTask(targetTaskID int64, server domain.Serve
 	if err != nil {
 		return fmt.Errorf("failed to query rollback version: %w", err)
 	}
-	if task == nil || task.Status != "success" {
+	if task == nil || task.Status != domain.StatusSuccess {
 		return fmt.Errorf("specified task is not a successful release or does not exist")
 	}
 	releaseName := task.ReleaseName
@@ -133,7 +122,7 @@ func (e *DeployEngine) RunRollbackToTask(targetTaskID int64, server domain.Serve
 	}
 
 	// 更新目标任务的状态为已回滚 (仅作标记)
-	if err := e.taskRepo.UpdateTaskStatus(int(targetTaskID), "rolled_back"); err != nil {
+	if err := e.taskRepo.UpdateTaskStatus(int(targetTaskID), domain.StatusRolledBack); err != nil {
 		return fmt.Errorf("database update failed but symlink rollback succeeded: %w", err)
 	}
 
@@ -155,7 +144,7 @@ func (e *DeployEngine) RunRollback(projectID, envID string, server domain.Server
 	var prevTaskID int64
 	var successCount int
 	for _, t := range tasks {
-		if t.Status == "success" {
+		if t.Status == domain.StatusSuccess {
 			successCount++
 			if successCount == 2 {
 				prevTaskID = int64(t.ID)
@@ -200,7 +189,7 @@ func (e *DeployEngine) StartDispatcher(workers int) {
 					}
 					defer func() {
 						if r := recover(); r != nil {
-							e.UpdateTaskStatus(job.TaskID, "failed")
+							e.UpdateTaskStatus(job.TaskID, domain.StatusFailed)
 							log.Printf("Deployment panic for task %d: %v", job.TaskID, r)
 						}
 					}()
@@ -246,7 +235,7 @@ func (e *DeployEngine) RunDeploy(ctx context.Context, taskID int64, config *doma
 	task, err := e.taskRepo.GetTaskByID(int(taskID))
 	if err != nil || task == nil {
 		log.Printf("[Task %d] Failed to query task: %v", taskID, err)
-		e.UpdateTaskStatus(taskID, "failed")
+		e.UpdateTaskStatus(taskID, domain.StatusFailed)
 		return
 	}
 	projectID := task.ProjectID
@@ -254,16 +243,21 @@ func (e *DeployEngine) RunDeploy(ctx context.Context, taskID int64, config *doma
 	commitID := task.CommitID
 	releaseName := task.ReleaseName
 	extraExclude := task.ExtraExclude
+	if e.executor == nil {
+		log.Printf("[Task %d] Error: node executor is not initialized", taskID)
+		e.UpdateTaskStatus(taskID, domain.StatusFailed)
+		return
+	}
 
 	lockKey := fmt.Sprintf("%s:%s", projectID, envID)
 	if _, loaded := e.projectLocks.LoadOrStore(lockKey, struct{}{}); loaded {
 		log.Printf("[Task %d] Concurrent deployment lock rejected for %s", taskID, lockKey)
-		e.UpdateTaskStatus(taskID, "failed_lock_rejected")
+		e.UpdateTaskStatus(taskID, domain.StatusFailedLockRejected)
 		return
 	}
 	defer e.projectLocks.Delete(lockKey)
 
-	e.UpdateTaskStatus(taskID, "deploying")
+	e.UpdateTaskStatus(taskID, domain.StatusDeploying)
 
 	// 打开日志文件用于输出构建细节
 	logFile, err := os.OpenFile(logFilePath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
@@ -287,7 +281,7 @@ func (e *DeployEngine) RunDeploy(ctx context.Context, taskID int64, config *doma
 	proj, exists := config.Projects[projectID]
 	if !exists {
 		writeLog("Error: project config %s not found", projectID)
-		e.UpdateTaskStatus(taskID, "failed")
+		e.UpdateTaskStatus(taskID, domain.StatusFailed)
 		return
 	}
 
@@ -301,7 +295,7 @@ func (e *DeployEngine) RunDeploy(ctx context.Context, taskID int64, config *doma
 
 	if targetEnv == nil {
 		writeLog("Error: environment config %s not found", envID)
-		e.UpdateTaskStatus(taskID, "failed")
+		e.UpdateTaskStatus(taskID, domain.StatusFailed)
 		return
 	}
 
@@ -316,7 +310,7 @@ func (e *DeployEngine) RunDeploy(ctx context.Context, taskID int64, config *doma
 
 	if err := os.MkdirAll(filepath.Dir(buildPath), 0755); err != nil {
 		writeLog("Error: failed to create workspace dir: %v", err)
-		e.UpdateTaskStatus(taskID, "failed")
+		e.UpdateTaskStatus(taskID, domain.StatusFailed)
 		return
 	}
 
@@ -332,7 +326,7 @@ func (e *DeployEngine) RunDeploy(ctx context.Context, taskID int64, config *doma
 	}
 	if output, err := runCmd(ctx, cloneCmd); err != nil {
 		writeLog("Error: git clone failed: %v (output: %s)", err, string(output))
-		e.UpdateTaskStatus(taskID, "failed")
+		e.UpdateTaskStatus(taskID, domain.StatusFailed)
 		return
 	}
 
@@ -343,7 +337,7 @@ func (e *DeployEngine) RunDeploy(ctx context.Context, taskID int64, config *doma
 	checkoutCmd.Dir = buildPath
 	if output, err := runCmd(ctx, checkoutCmd); err != nil {
 		writeLog("Error: git checkout failed: %v (output: %s)", err, string(output))
-		e.UpdateTaskStatus(taskID, "failed")
+		e.UpdateTaskStatus(taskID, domain.StatusFailed)
 		return
 	}
 
@@ -351,7 +345,7 @@ func (e *DeployEngine) RunDeploy(ctx context.Context, taskID int64, config *doma
 	writeLog("Step 3: Executing local build hooks...")
 	if err := e.RunLocalBuild(ctx, proj, buildPath); err != nil {
 		writeLog("Error: local build hooks failed: %v", err)
-		e.UpdateTaskStatus(taskID, "failed")
+		e.UpdateTaskStatus(taskID, domain.StatusFailed)
 		return
 	}
 
@@ -366,7 +360,7 @@ func (e *DeployEngine) RunDeploy(ctx context.Context, taskID int64, config *doma
 	var prevReleaseName string
 	tasks, _ := e.taskRepo.GetTasksByEnv(projectID, envID, 5)
 	for _, t := range tasks {
-		if t.Status == "success" {
+		if t.Status == domain.StatusSuccess {
 			prevReleaseName = t.ReleaseName
 			break
 		}
@@ -380,16 +374,8 @@ func (e *DeployEngine) RunDeploy(ctx context.Context, taskID int64, config *doma
 			defer func() { <-sem }()
 
 			writeLog("Step 4 [Phase1]: Synchronizing files to remote server %s:%d...", srv.Host, srv.Port)
-			executor := e.executor
-			if executor == nil {
-				executor = ssh.NewSSHExecutor(srv, e.getPool(srv))
-				// We attach Ctx directly to the struct if needed, but NewSSHExecutor returns a pointer, so we can't easily chain unless we mutate
-				if sshExec, ok := executor.(*ssh.SSHExecutor); ok {
-					sshExec.Ctx = ctx
-				}
-			}
 
-			// 合并静态与动态排除规则，注入到 executor 的 ExcludeList 中
+			// 合并静态与动态排除规则
 			// @Ref: docs/sps/plans/20260529_deploy_enhancements_plan.md | @Date: 2026-05-29
 			var totalExcludes []string
 			totalExcludes = append(totalExcludes, proj.Exclude...)
@@ -412,14 +398,10 @@ func (e *DeployEngine) RunDeploy(ctx context.Context, taskID int64, config *doma
 				safeExcludes = append(safeExcludes, ex)
 			}
 
-			if sshExec, ok := executor.(*ssh.SSHExecutor); ok {
-				sshExec.ExcludeList = safeExcludes
-			}
-
 			// 检查目标机 releases 目录是否存在
 			releasesDir := filepath.ToSlash(filepath.Join(srv.DeployTo, "releases"))
 			mkCmd := fmt.Sprintf("mkdir -p %s", releasesDir)
-			if _, err := executor.RunCommand(mkCmd); err != nil {
+			if _, err := e.executor.RunCommand(ctx, srv, mkCmd); err != nil {
 				writeLog("Error: failed to create remote releases directory on %s: %v", srv.Host, err)
 				rsyncMu.Lock()
 				rsyncFailed = true
@@ -435,8 +417,8 @@ func (e *DeployEngine) RunDeploy(ctx context.Context, taskID int64, config *doma
 			remoteReleasePath := filepath.ToSlash(filepath.Join(releasesDir, releaseName)) + "/"
 			localBuildDir := buildPath + "/"
 
-			// 调用 Rsync
-			if err := executor.Rsync(localBuildDir, remoteReleasePath, absoluteLinkDest); err != nil {
+			// 调用 Rsync — NodeExecutor 接口，ctx 和 excludes 作为参数传入
+			if err := e.executor.Rsync(ctx, srv, localBuildDir, remoteReleasePath, absoluteLinkDest, safeExcludes); err != nil {
 				writeLog("Error: Rsync failed on %s: %v", srv.Host, err)
 				rsyncMu.Lock()
 				rsyncFailed = true
@@ -449,7 +431,7 @@ func (e *DeployEngine) RunDeploy(ctx context.Context, taskID int64, config *doma
 	wg.Wait()
 	if rsyncFailed {
 		writeLog("Error: Phase 1 Rsync failed on one or more nodes. Halting deployment.")
-		e.UpdateTaskStatus(taskID, "failed")
+		e.UpdateTaskStatus(taskID, domain.StatusFailed)
 		return
 	}
 
@@ -477,19 +459,12 @@ func (e *DeployEngine) RunDeploy(ctx context.Context, taskID int64, config *doma
 			// 5. 执行后置 hook (不影响主流程)
 			if len(targetEnv.AfterSymlink) > 0 {
 				writeLog("Step 6: Executing after_symlink remote hooks on %s...", srv.Host)
-				executor := e.executor
-				if executor == nil {
-					executor = ssh.NewSSHExecutor(srv, e.getPool(srv))
-					if sshExec, ok := executor.(*ssh.SSHExecutor); ok {
-						sshExec.Ctx = ctx
-					}
-				}
 				for _, hook := range targetEnv.AfterSymlink {
 					if hook == "" {
 						continue
 					}
 					hookCmd := fmt.Sprintf("cd %s && %s", filepath.ToSlash(filepath.Join(srv.DeployTo, "current")), hook)
-					if out, err := executor.RunCommand(hookCmd); err != nil {
+					if out, err := e.executor.RunCommand(ctx, srv, hookCmd); err != nil {
 						writeLog("Warning: after_symlink hook %q failed on %s (output: %s): %v", hook, srv.Host, out, err)
 					}
 				}
@@ -515,7 +490,7 @@ func (e *DeployEngine) RunDeploy(ctx context.Context, taskID int64, config *doma
 				var rbReleaseName string
 				tasks, err := e.taskRepo.GetTasksByEnv(projectID, envID, 5)
 				for _, t := range tasks {
-					if t.Status == "success" {
+					if t.Status == domain.StatusSuccess {
 						rbReleaseName = t.ReleaseName
 						break
 					}
@@ -542,23 +517,23 @@ func (e *DeployEngine) RunDeploy(ctx context.Context, taskID int64, config *doma
 
 		if rollbackFailed {
 			writeLog("CRITICAL: Rollback failed on one or more nodes! Brain Split detected!")
-			e.UpdateTaskStatus(taskID, "critical_brain_split")
+			e.UpdateTaskStatus(taskID, domain.StatusCriticalBrainSplit)
 		} else {
 			writeLog("Rollback successful. Marking task as failed.")
-			e.UpdateTaskStatus(taskID, "failed")
+			e.UpdateTaskStatus(taskID, domain.StatusFailed)
 		}
 		return
 	}
 
 	writeLog("Deployment completed successfully!")
-	e.UpdateTaskStatus(taskID, "success")
+	e.UpdateTaskStatus(taskID, domain.StatusSuccess)
 
 	// @Ref: docs/sps/decisions/20260529_diff_ux_loading_scan.md | @Date: 2026-05-29
 	// 异步生成持久化 diff 快照，确保即使 git 仓库被清理后仍可查看
 	go e.cacheTaskDiff(taskID, projectID, envID, commitID, releaseName, config, logFilePath)
 }
 
-func (e *DeployEngine) UpdateTaskStatus(taskID int64, status string) {
+func (e *DeployEngine) UpdateTaskStatus(taskID int64, status domain.DeployStatus) {
 	err := e.taskRepo.UpdateTaskStatus(int(taskID), status)
 	if err != nil {
 		log.Printf("Failed to update task status in DB: %v", err)
@@ -584,7 +559,7 @@ func (e *DeployEngine) cacheTaskDiff(taskID int64, projectID, envID, commitID, r
 	tasks, err := e.taskRepo.GetTasksByEnv(projectID, envID, 100)
 	if err == nil {
 		for _, t := range tasks {
-			if t.ID < int(taskID) && t.Status == "success" {
+			if t.ID < int(taskID) && t.Status == domain.StatusSuccess {
 				prevCommit = t.CommitID
 				break
 			}
@@ -690,30 +665,3 @@ func generateTaskDiff(prevCommit, currentCommit, gitRepoPath string, timeout tim
 	return diffStr, filesStr
 }
 
-// runCmd 是一个安全的本地命令执行包裹函数，解决 Windows/Linux 等平台在 Context 超时时无法彻底清退整个子进程树的问题。
-// @Ref: docs/sps/plans/20260527_nanoplan_resilience.md | @Date: 2026-05-27
-func runCmd(ctx context.Context, cmd *exec.Cmd) ([]byte, error) {
-	var buf bytes.Buffer
-	cmd.Stdout = &buf
-	cmd.Stderr = &buf
-
-	sys.SetProcessGroup(cmd)
-
-	if err := cmd.Start(); err != nil {
-		return nil, err
-	}
-
-	done := make(chan error, 1)
-	go func() {
-		done <- cmd.Wait()
-	}()
-
-	select {
-	case <-ctx.Done():
-		sys.KillProcessGroup(cmd)
-		<-done // 确保资源完全释放
-		return buf.Bytes(), ctx.Err()
-	case err := <-done:
-		return buf.Bytes(), err
-	}
-}

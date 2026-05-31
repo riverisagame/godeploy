@@ -51,7 +51,7 @@ func TestProjectPermissions(t *testing.T) {
 			"proj_b": {ID: "proj_b", Name: "Project B"},
 		},
 	}
-	engine := application.NewDeployEngine(taskRepo, nil)
+	engine := application.NewDeployEngine(taskRepo, nil, nil)
 	r := SetupRoutes(config, db, taskRepo, engine)
 
 	t.Run("user1 sees all projects", func(t *testing.T) {

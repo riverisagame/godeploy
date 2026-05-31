@@ -74,7 +74,7 @@ func SetupEnhanceTestRouter(t *testing.T) (*gin.Engine, *sql.DB, func()) {
 		},
 	}
 
-	engine := application.NewDeployEngine(taskRepo, nil)
+	engine := application.NewDeployEngine(taskRepo, nil, nil)
 	engine.StartDispatcher(1)
 	r := SetupRoutes(mockConfig, db, taskRepo, engine)
 
@@ -222,7 +222,7 @@ func TestAPI_JSON_ChangesCache(t *testing.T) {
 		},
 	}
 
-	engine := application.NewDeployEngine(taskRepo, nil)
+	engine := application.NewDeployEngine(taskRepo, nil, nil)
 	r := SetupRoutes(mockConfig, db, taskRepo, engine)
 
 	req, _ := http.NewRequest("GET", "/api/tasks/501/diff", nil)
@@ -315,7 +315,7 @@ func TestAPI_DualDiff_PersistenceAndFallback(t *testing.T) {
 		},
 	}
 
-	engine := application.NewDeployEngine(taskRepo, nil)
+	engine := application.NewDeployEngine(taskRepo, nil, nil)
 	r := SetupRoutes(mockConfig, db, taskRepo, engine)
 
 	adminToken, _ := application.GenerateToken("admin", "admin", "test-secret-key-12345", 5*time.Second)

@@ -103,8 +103,8 @@ func createDefaultAdmin(db *gorm.DB) error {
 
 func repairStalledTasks(db *gorm.DB) error {
 	return db.Model(&domain.DeployTask{}).
-		Where("status IN ?", []string{"pending", "deploying"}).
-		Update("status", "aborted").Error
+		Where("status IN ?", []domain.DeployStatus{domain.StatusPending, domain.StatusDeploying}).
+		Update("status", string(domain.StatusAborted)).Error
 }
 
 // InitTestDB provides a unified helper for tests to get both sql.DB and TaskRepository

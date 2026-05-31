@@ -2,13 +2,12 @@ package api
 
 import (
 	"sync"
-
 	"bytes"
+	"context"
 	"database/sql"
 	"deploy/godeployer/application"
 	"deploy/godeployer/domain"
 	"deploy/godeployer/infrastructure/db"
-	"deploy/godeployer/infrastructure/ssh"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -44,7 +43,7 @@ func SetupTestRouter(t *testing.T) (*gin.Engine, *sql.DB, func()) {
 			"test-app": {
 				ID:            "test-app",
 				Name:          "Mock Test App",
-				Repo:          "git@github.com:mock/test-app.git",
+				Repo:          "file:///tmp/mock/test-app.git",
 				WebhookSecret: "secret123",
 				Branch:        "main",
 				Environments: []domain.EnvironmentConfig{
@@ -67,7 +66,7 @@ func SetupTestRouter(t *testing.T) (*gin.Engine, *sql.DB, func()) {
 	}
 
 	// 注册路由
-	engine := application.NewDeployEngine(taskRepo, nil)
+	engine := application.NewDeployEngine(taskRepo, nil, nil)
 	engine.StartDispatcher(1)
 	r := SetupRoutes(mockConfig, db, taskRepo, engine)
 
@@ -82,7 +81,7 @@ func SetupTestRouter(t *testing.T) (*gin.Engine, *sql.DB, func()) {
 	return r, db, cleanup
 }
 
-func SetupTestRouterWithExecutor(t *testing.T, executor ssh.RemoteExecutor) (*gin.Engine, *sql.DB, func()) {
+func SetupTestRouterWithExecutor(t *testing.T, executor domain.NodeExecutor) (*gin.Engine, *sql.DB, func()) {
 	gin.SetMode(gin.TestMode)
 
 	db, taskRepo, err := db.InitTestDB(fmt.Sprintf("file:mem_%d?mode=memory&cache=shared", time.Now().UnixNano()))
@@ -100,7 +99,7 @@ func SetupTestRouterWithExecutor(t *testing.T, executor ssh.RemoteExecutor) (*gi
 			"test-app": {
 				ID:            "test-app",
 				Name:          "Mock Test App",
-				Repo:          "git@github.com:mock/test-app.git",
+				Repo:          "file:///tmp/mock/test-app.git",
 				WebhookSecret: "secret123",
 				Branch:        "main",
 				Environments: []domain.EnvironmentConfig{
@@ -122,7 +121,7 @@ func SetupTestRouterWithExecutor(t *testing.T, executor ssh.RemoteExecutor) (*gi
 		},
 	}
 
-	engine := application.NewDeployEngine(taskRepo, executor)
+	engine := application.NewDeployEngine(taskRepo, executor, nil)
 	engine.StartDispatcher(1)
 	r := SetupRoutesWithExecutor(mockConfig, db, taskRepo, executor, engine)
 
@@ -508,25 +507,36 @@ func TestHandleDeploy_InvalidEnv(t *testing.T) {
 
 
 type MockRemoteExecutor struct {
-    mu sync.Mutex
-    commandsRun []string
+	mu          sync.Mutex
+	commandsRun []string
 }
-func (m *MockRemoteExecutor) RunCommand(cmd string) (string, error) {
-    m.mu.Lock()
-    defer m.mu.Unlock()
-    m.commandsRun = append(m.commandsRun, cmd)
-    return "", nil
+
+func (m *MockRemoteExecutor) RunCommand(_ context.Context, _ domain.ServerConfig, cmd string) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.commandsRun = append(m.commandsRun, cmd)
+	return "", nil
 }
-func (m *MockRemoteExecutor) Rsync(a, b, c string) error {
-    return nil
+
+func (m *MockRemoteExecutor) Rsync(_ context.Context, _ domain.ServerConfig, a, b, c string, _ []string) error {
+	return nil
+}
+
+func (m *MockRemoteExecutor) SwitchSymlink(_ context.Context, _ domain.ServerConfig, releaseName string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cmd := fmt.Sprintf("ln -sfn releases/%s current_temp && mv -Tf current_temp current", releaseName)
+	m.commandsRun = append(m.commandsRun, cmd)
+	return nil
 }
 func (m *MockRemoteExecutor) Close() error {
-    return nil
+	return nil
 }
+
 func (m *MockRemoteExecutor) GetCommands() []string {
-    m.mu.Lock()
-    defer m.mu.Unlock()
-    res := make([]string, len(m.commandsRun))
-    copy(res, m.commandsRun)
-    return res
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	res := make([]string, len(m.commandsRun))
+	copy(res, m.commandsRun)
+	return res
 }

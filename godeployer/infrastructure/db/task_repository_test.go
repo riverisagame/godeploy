@@ -19,7 +19,7 @@ func TestTaskRepository(t *testing.T) {
 		ProjectID:      "proj_1",
 		EnvID:          "env_1",
 		CommitID:       "abc1234",
-		Status:         "pending",
+		Status:         domain.StatusPending,
 		ReleaseName:    "rel_1",
 		UserID:         1,
 		Username:       "admin",
