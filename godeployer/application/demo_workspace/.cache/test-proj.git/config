@@ -2,7 +2,6 @@
 	repositoryformatversion = 0
 	filemode = false
 	bare = true
-	symlinks = false
 	ignorecase = true
 [remote "origin"]
-	url = C:\\Users\\ADMINI~1.BF-\\AppData\\Local\\Temp\\TestDeployEngine_ExcludeInjection1961931533\\001
+	url = /tmp/TestDeployEngine_ExcludeInjection2607631307/001

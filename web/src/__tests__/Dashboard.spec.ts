@@ -72,6 +72,7 @@ describe('Dashboard.vue Component UI Test', () => {
 
     const vm = wrapper.vm as any;
     vm.deployForm.branch = 'main';
+    vm.deployForm.description = 'test diff';
     await vm.triggerDeploy({ id: 'e1', name: 'E1' });
     await new Promise(r => setTimeout(r, 100));
 
