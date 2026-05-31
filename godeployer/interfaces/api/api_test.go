@@ -74,6 +74,9 @@ func SetupTestRouter(t *testing.T) (*gin.Engine, *sql.DB, func()) {
 	cleanup := func() {
 		engine.Close(2 * time.Second)
 		db.Close()
+		os.RemoveAll("demo_workspace")
+		os.RemoveAll("test_logs")
+		os.RemoveAll("test-app")
 	}
 
 	return r, db, cleanup
@@ -126,6 +129,9 @@ func SetupTestRouterWithExecutor(t *testing.T, executor ssh.RemoteExecutor) (*gi
 	cleanup := func() {
 		engine.Close(2 * time.Second)
 		db.Close()
+		os.RemoveAll("demo_workspace")
+		os.RemoveAll("test_logs")
+		os.RemoveAll("test-app")
 	}
 
 	return r, db, cleanup

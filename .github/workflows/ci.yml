@@ -19,6 +19,9 @@ jobs:
           go-version: '1.25.x'
           cache: true
 
+      - name: Create dummy dist for embed
+        run: mkdir -p godeployer/dist && touch godeployer/dist/index.html
+
       - name: Run Go Tests
         run: go test -v -race ./...
 
