@@ -1,54 +1,91 @@
+// ============================================================
+// 文件：git.go
+// 作用：🌿 Git 操作工具箱——管理代码仓库！
+//
+// Git 是一个非常强大的"版本控制"工具。
+// 简单理解：就像玩游戏的"存档"功能——
+// 你可以看到每次改了什么、谁改的、什么时候改的。
+//
+// 这个文件负责所有 Git 相关的操作：
+// 1. 维护本地 bare 仓库缓存（加速克隆速度）
+// 2. 查询提交记录（commit log）
+// 3. 获取代码差异（diff——看看改了什么）
+// 4. 查找仓库、验证提交等辅助功能
+//
+// 给初二小白的解释：
+// - bare 仓库 = 一个"大仓库"，没有工作目录，专门用来 clone
+// - commit = 一次"存档"，记录了当时代码的样子
+// - diff = 两个版本之间的"找不同"
+// ============================================================
+
 package git
 
 import (
-	"context"
-	"fmt"
-	"io"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"strings"
-	"time"
+	"context"       // 📡 上下文：控制超时
+	"fmt"           // ✏️ 格式化
+	"io"            // 📥 输入输出：读取 diff 流
+	"os"            // 💻 文件系统操作
+	"os/exec"       // 🖥️ 执行 Git 命令
+	"path/filepath" // 📁 路径处理
+	"strings"       // 📏 字符串处理
+	"time"          // ⏰ 超时控制
 )
 
+// GitCommit 一次 Git 提交的信息
+// 就像作业本上的一次批改记录——谁改的、改了什么内容、什么时候改的
 type GitCommit struct {
-	Hash      string `json:"hash"`
-	Message   string `json:"message"`
-	Author    string `json:"author"`
-	CreatedAt string `json:"created_at"`
+	Hash      string `json:"hash"`       // 🆔 提交的唯一 ID（40 位十六进制）
+	Message   string `json:"message"`    // 📝 提交信息（程序员写的"这次改了啥"）
+	Author    string `json:"author"`     // 👤 作者名字
+	CreatedAt string `json:"created_at"` // 📅 提交时间（ISO 格式）
 }
 
+// GetCacheDir 返回项目 bare 仓库的缓存目录路径
+// bare 仓库 = 只有 git 历史没有工作文件的"轻量版仓库"
+// 用它来 clone 比从远程仓库 clone 快 100 倍！
 func GetCacheDir(projectID string) string {
 	return filepath.Join("demo_workspace", ".cache", projectID+".git")
 }
+
+// ============================================================
+// 🗃️ EnsureRepoCache：确保 bare 仓库缓存存在且最新
+//
+// 这个函数的逻辑像一个"智能缓存"：
+// 1. 检查缓存目录是否存在
+// 2. 如果存在，检查 remote URL 是否匹配（如果换了仓库地址就重建）
+// 3. 如果不存在，从远程仓库 clone 一份 bare 仓库
+// 4. 如果已存在，执行 git fetch 更新到最新
+// ============================================================
 
 // EnsureRepoCache 确保对应项目的 bare 仓库存在并更新至最新
 func EnsureRepoCache(ctx context.Context, repoURL, projectID string) error {
 	cacheDir := GetCacheDir(projectID)
 
-	// 如果目录已存在，先校验其 remote origin 是否与当前请求的 repoURL 相同
+	// --- 检查已有缓存 ---
 	if _, err := os.Stat(cacheDir); err == nil {
+		// ✅ 缓存目录存在
+		// 检查它的 remote origin 是否跟我们要的一致
 		cmdCheck := exec.CommandContext(ctx, "git", "remote", "get-url", "origin")
 		cmdCheck.Dir = cacheDir
 		if out, err := cmdCheck.CombinedOutput(); err == nil {
 			currentRemote := strings.TrimSpace(string(out))
-			// 统一转成斜杠路径或清除首尾空白后进行对比
+			// 如果仓库地址变了，说明项目移动到新仓库了，删除旧缓存重建
 			if filepath.ToSlash(currentRemote) != filepath.ToSlash(repoURL) {
-				// // @Ref: docs/sps/plans/20260530_fix_task_log_errors_plan.md | @Date: 2026-05-30
-				// URL不一致，说明项目仓库发生了更改，清除本地缓存重建
-				os.RemoveAll(cacheDir)
+				os.RemoveAll(cacheDir) // 🗑️ 删除旧缓存
 			}
 		} else {
-			// 如果获取失败说明本地不是正常 bare 库，清空重建
+			// 获取 remote 失败，说明本地缓存有问题，删了重建
 			os.RemoveAll(cacheDir)
 		}
 	}
 
-	// 如果目录不存在，执行 git clone --bare
+	// --- 如果缓存不存在，从远程 clone ---
 	if _, err := os.Stat(cacheDir); os.IsNotExist(err) {
 		if err := os.MkdirAll(filepath.Dir(cacheDir), 0755); err != nil {
 			return err
 		}
+		// git clone --bare：只克隆 git 历史，不创建工作文件
+		// --no-hardlinks：不使用硬链接（兼容不同文件系统）
 		cmd := exec.CommandContext(ctx, "git", "clone", "--no-hardlinks", "--bare", repoURL, cacheDir)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			return fmt.Errorf("git clone failed: %v, output: %s", err, string(out))
@@ -56,20 +93,33 @@ func EnsureRepoCache(ctx context.Context, repoURL, projectID string) error {
 		return nil
 	}
 
-	// 如果目录已存在，执行 git fetch origin
-	cmd := exec.CommandContext(ctx, "git", "fetch", "origin", "+refs/heads/*:refs/heads/*", "+refs/tags/*:refs/tags/*", "--prune")
+	// --- 如果缓存已存在，执行 git fetch 更新 ---
+	// +refs/heads/*:refs/heads/* 表示强制更新所有分支
+	// --prune 删除远程已经删掉的分支
+	cmd := exec.CommandContext(ctx, "git", "fetch", "origin",
+		"+refs/heads/*:refs/heads/*", "+refs/tags/*:refs/tags/*", "--prune")
 	cmd.Dir = cacheDir
 	if out, err := cmd.CombinedOutput(); err != nil {
 		// @Ref: docs/sps/plans/20260530_fix_branch_deploy_diff_freeze_plan.md | @Date: 2026-05-30
-		// 单元测试中如果将开发中的本地仓库作为 repoURL，fetch 自身检出分支可能会被 git 拦截报错，但在测试环境下缓存已是最新，因此可直接容忍该错误。
+		// 如果是本地仓库作为 repoURL，fetch 本身可能会因为分支检出问题报错
 		if strings.Contains(string(out), "refusing to fetch into branch") {
-			return nil
+			return nil // 容忍这个错误，缓存已经是最新的了
 		}
 		return fmt.Errorf("git fetch failed: %v, output: %s", err, string(out))
 	}
 
 	return nil
 }
+
+// ============================================================
+// 📜 GetCommits：获取最新的提交记录
+//
+// 支持按以下条件搜索：
+// - keyword：在提交信息中搜索关键词
+// - author：按作者搜索
+// - file：按涉及的文件搜索
+// - ref：指定分支/标签（不指定就查所有分支）
+// ============================================================
 
 // GetCommits 获取最新 50 条提交记录，并支持按 message/author/file 搜索，支持按 ref（分支/Tag）过滤
 func GetCommits(ctx context.Context, projectID, keyword, author, file, ref string) ([]GitCommit, error) {
@@ -78,22 +128,23 @@ func GetCommits(ctx context.Context, projectID, keyword, author, file, ref strin
 		return nil, fmt.Errorf("git cache not found for project %s", projectID)
 	}
 
+	// 构建 git log 命令参数
+	// --format=%H|%s|%an|%cI 自定义输出格式：hash|消息|作者|时间
 	args := []string{"log", "-n", "50", "--format=%H|%s|%an|%cI"}
+
 	if keyword != "" {
-		args = append(args, "--grep="+keyword, "-i")
+		args = append(args, "--grep="+keyword, "-i") // -i 不区分大小写
 	}
 	if author != "" {
 		args = append(args, "--author="+author, "-i")
 	}
 	if ref != "" {
-		args = append(args, ref)
+		args = append(args, ref) // 只查某个分支/标签
 	} else {
-		// 查询全部分支
-		args = append(args, "--all")
+		args = append(args, "--all") // 查全部分支
 	}
-
 	if file != "" {
-		args = append(args, "--", file)
+		args = append(args, "--", file) // 只查涉及某个文件的提交
 	}
 
 	cmd := exec.CommandContext(ctx, "git", args...)
@@ -103,6 +154,7 @@ func GetCommits(ctx context.Context, projectID, keyword, author, file, ref strin
 		return nil, fmt.Errorf("git log failed: %v", err)
 	}
 
+	// 解析输出：每行用 | 分隔 → 分成 Hash/Message/Author/CreatedAt
 	var commits []GitCommit
 	lines := strings.Split(string(out), "\n")
 	for _, line := range lines {
@@ -123,6 +175,13 @@ func GetCommits(ctx context.Context, projectID, keyword, author, file, ref strin
 	return commits, nil
 }
 
+// ============================================================
+// 🔍 GetDiff：获取两次提交之间的代码差异
+//
+// 如果 fromCommit 为空，就查看 toCommit 相对于父提交的变更。
+// limitBytes 参数可以限制 diff 的大小（防止把内存撑爆）。
+// ============================================================
+
 // GetDiff 获取两次提交之间的 diff 字符串。如果 fromCommit 为空则默认比较该 commit 本身变更。
 func GetDiff(ctx context.Context, projectID, fromCommit, toCommit string, limitBytes int) (string, error) {
 	cacheDir := GetCacheDir(projectID)
@@ -132,8 +191,7 @@ func GetDiff(ctx context.Context, projectID, fromCommit, toCommit string, limitB
 
 	var args []string
 	if fromCommit == "" {
-		// 只有一个 commit 时查看该 commit 较上一版本的改动
-		args = []string{"show", "--format=", toCommit} // --format= 移除 log header，只保留 diff
+		args = []string{"show", "--format=", toCommit} // --format= 去掉 log 头，只保留 diff
 	} else {
 		args = []string{"diff", fromCommit, toCommit}
 	}
@@ -141,6 +199,7 @@ func GetDiff(ctx context.Context, projectID, fromCommit, toCommit string, limitB
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = cacheDir
 
+	// 如果不限制大小，直接获取完整 diff
 	if limitBytes <= 0 {
 		out, err := cmd.CombinedOutput()
 		if err != nil {
@@ -149,11 +208,11 @@ func GetDiff(ctx context.Context, projectID, fromCommit, toCommit string, limitB
 		return string(out), nil
 	}
 
+	// 限制大小：通过管道流式读取，超过限制就截断
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return "", err
 	}
-
 	if err := cmd.Start(); err != nil {
 		return "", err
 	}
@@ -162,8 +221,8 @@ func GetDiff(ctx context.Context, projectID, fromCommit, toCommit string, limitB
 	n, _ := io.ReadFull(stdout, data)
 
 	if n > limitBytes {
-		_ = cmd.Process.Kill()
-		return string(data[:limitBytes]) + "\n\n... [Diff 截断: 文件变更过大，超出系统物理隔离安全限制 (DiffMaxSizeKB)]", nil
+		_ = cmd.Process.Kill() // 超出限制，杀掉进程
+		return string(data[:limitBytes]) + "\n\n... [Diff 截断: 文件变更过大]", nil
 	}
 
 	go cmd.Wait()
@@ -200,7 +259,6 @@ func GetDiffForFile(ctx context.Context, projectID, fromCommit, toCommit, file s
 	if err != nil {
 		return "", err
 	}
-
 	if err := cmd.Start(); err != nil {
 		return "", err
 	}
@@ -210,11 +268,10 @@ func GetDiffForFile(ctx context.Context, projectID, fromCommit, toCommit, file s
 
 	if n > limitBytes {
 		_ = cmd.Process.Kill()
-		return string(data[:limitBytes]) + "\n\n... [Diff 截断: 文件变更过大，超出系统物理隔离安全限制 (DiffMaxSizeKB)]", nil
+		return string(data[:limitBytes]) + "\n\n... [Diff 截断: 文件变更过大]", nil
 	}
 
 	// @Ref: docs/sps/plans/20260530_fix_branch_deploy_diff_freeze_plan.md | @Date: 2026-05-30
-	// 必须同步等待命令执行完毕并检查错误，否则当 git 命令非零退出时，无法触发外部的物理快照降级提取
 	if err := cmd.Wait(); err != nil {
 		return "", err
 	}
@@ -234,14 +291,15 @@ func GetCommitAuthor(ctx context.Context, projectID, ref string) (string, error)
 	if err != nil {
 		return "", fmt.Errorf("git show failed: %v, output: %s", err, string(out))
 	}
-
 	return strings.TrimSpace(string(out)), nil
 }
 
-// git.FindGitRepo 在 root 目录树中递归查找包含指定 commit 的 git 仓库，返回第一个匹配路径。
+// FindGitRepo 在 root 目录树中递归查找包含指定 commit 的 git 仓库
+// 就像在一堆文件夹里找包含某次"存档"的游戏存档目录
 func FindGitRepo(root, commit string) (string, error) {
 	// @Ref: docs/sps/plans/20260530_fix_branch_deploy_diff_freeze_plan.md | @Date: 2026-05-30
-	// 如果 commit 不是 40 位的十六进制 Commit Hash (或者是分支名、空等)，直接返回，杜绝极其耗时的全局 Walk
+	// 如果传入的不是 40 位 SHA（比如分支名），直接返回
+	// 防止因为全局搜索太慢把系统搞崩
 	if len(commit) != 40 {
 		return "", nil
 	}
@@ -255,12 +313,11 @@ func FindGitRepo(root, commit string) (string, error) {
 	var result string
 	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-			return nil // 忽略权限错误，继续
+			return nil // 忽略权限错误
 		}
-		// 找到 .git 目录，说明 path 的父目录是 git 仓库
 		if info.IsDir() && info.Name() == ".git" {
 			repoDir := filepath.Dir(path)
-			// 检查该仓库是否包含目标 commit
+			// 检查这个仓库里有没有指定的 commit
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()
 			checkCmd := exec.CommandContext(ctx, "git", "cat-file", "-t", commit)
@@ -268,7 +325,7 @@ func FindGitRepo(root, commit string) (string, error) {
 			out, checkErr := checkCmd.Output()
 			if checkErr == nil && strings.TrimSpace(string(out)) == "commit" {
 				result = repoDir
-				return filepath.SkipAll // 找到即停止
+				return filepath.SkipAll // 找到了，停止搜索
 			}
 		}
 		return nil
@@ -276,17 +333,15 @@ func FindGitRepo(root, commit string) (string, error) {
 	return result, err
 }
 
-// git.FilterFilesForTruncatedDiff 在 diff 文本被字节截断后，同步裁剪 files 列表，
-// 确保"变更文件列表"与"代码差异"两个标签页展示的文件范围完全一致。
+// FilterFilesForTruncatedDiff diff 被截断后，同步裁剪文件列表
+// 确保 diff 展示的文件跟实际 diff 内容一致
 func FilterFilesForTruncatedDiff(truncatedDiff, originalFiles string) string {
-	// 从截断后的 diff 文本中提取已包含的文件路径
 	fileSet := make(map[string]bool)
 	lines := strings.Split(truncatedDiff, "\n")
 	for _, line := range lines {
 		if !strings.HasPrefix(line, "diff --git a/") {
 			continue
 		}
-		// diff --git a/path/to/file b/path/to/file
 		parts := strings.SplitN(line, " ", 4)
 		if len(parts) >= 4 {
 			file := strings.TrimPrefix(parts[2], "a/")
@@ -295,10 +350,9 @@ func FilterFilesForTruncatedDiff(truncatedDiff, originalFiles string) string {
 	}
 
 	if len(fileSet) == 0 {
-		return originalFiles // 未提取到文件，保留原列表
+		return originalFiles
 	}
 
-	// 从原 files 列表中只保留 diff 中存在的文件
 	filesLines := strings.Split(strings.TrimSpace(originalFiles), "\n")
 	var filtered []string
 	for _, line := range filesLines {
@@ -306,7 +360,6 @@ func FilterFilesForTruncatedDiff(truncatedDiff, originalFiles string) string {
 		if line == "" {
 			continue
 		}
-		// git --name-status 输出: "M\tpath"   git --name-only 输出: "path"
 		parts := strings.SplitN(line, "\t", 2)
 		file := line
 		if len(parts) == 2 {
@@ -323,6 +376,8 @@ func FilterFilesForTruncatedDiff(truncatedDiff, originalFiles string) string {
 	return originalFiles
 }
 
+// IsCommitHash 检查字符串是不是合法的 40 位 Git 提交哈希
+// Git 的 commit hash 是 40 位十六进制数（0-9, a-f）
 func IsCommitHash(ref string) bool {
 	if len(ref) != 40 {
 		return false
@@ -334,3 +389,29 @@ func IsCommitHash(ref string) bool {
 	}
 	return true
 }
+
+// ============================================================
+// 📚 面试题大全
+// ============================================================
+// 初级：
+// 1. Q: bare 仓库是什么？
+//    A: 只有 git 历史，没有工作目录。就像一个"存档专用文件夹"~
+//
+// 2. Q: git diff 和 git show 有什么区别？
+//    A: show 显示单次提交的变更，diff 显示两个提交之间的差异~
+//
+// 中级：
+// 3. Q: 为什么不用直接 clone 远程仓库，而是先建 bare cache？
+//    A: 从本地 bare 仓库 clone 比从远程 clone 快几十倍！
+//       而且 bare 仓库只更新 fetch，不用每次重新下载全部历史~
+//
+// 4. Q: FindGitRepo 为什么先检查 commit 长度？
+//    A: 如果传进来的是分支名（比如 "main"），
+//       全局搜索会非常耗时。40 位 SHA 检查是个快速过滤器~
+//
+// 高级：
+// 5. Q: io.ReadFull 在 limitBytes 场景下的作用？
+//    A: 只会读取指定数量的字节，超过就丢弃。
+//       git diff 可能产生非常巨大的输出（比如几百 MB），
+//       用 ReadFull 确保内存不会被撑爆~
+// ============================================================

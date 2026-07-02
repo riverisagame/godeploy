@@ -1,3 +1,17 @@
+// ============================================================
+// 文件：handler_prune.go
+// 作用：🧹 系统清理工具——删除旧任务，释放磁盘空间！
+//
+// 部署任务多了会占用磁盘空间（日志文件、diff 快照等）。
+// 这个函数负责"大扫除"：
+//
+// 1. 按天数清理：删除超过 N 天的旧任务
+// 2. 按数量清理：只保留最近 N 条任务
+// 3. 孤儿文件清理：删除数据库里不存在对应任务的日志/diff 文件
+//
+// 调用方式：管理员手动触发 POST /api/system/prune
+// ============================================================
+
 package api
 
 import (
@@ -14,6 +28,7 @@ import (
 // HandleSystemPrune 手动系统清理与脏数据自愈
 // @Ref: docs/sps/plans/20260529_diff_ux_loading_plan.md | @Date: 2026-05-29
 func (h *APIHandler) HandleSystemPrune(c *gin.Context) {
+	// 只有管理员才能清理
 	roleVal, _ := c.Get("role")
 	if roleVal.(string) != "admin" {
 		c.JSON(http.StatusForbidden, gin.H{"error": "admin role required"})
@@ -23,11 +38,13 @@ func (h *APIHandler) HandleSystemPrune(c *gin.Context) {
 	var prunedTasksCount, prunedOrphansCount int
 	var freedBytes int64
 
-	// 1. 主动老化清理
+	// ============================================================
+	// 📦 1. 查找要清理的旧任务
+	// ============================================================
 	var idsToPrune []int64
 	var taskMap = make(map[int64][2]string) // taskID -> [projectID, createdAt]
 
-	// 基于天数老化
+	// 1a. 按天数清理
 	if h.config.Global.TaskRetainDays > 0 {
 		cutoffTime := time.Now().AddDate(0, 0, -h.config.Global.TaskRetainDays)
 		rows, err := h.db.Query(`
@@ -47,7 +64,7 @@ func (h *APIHandler) HandleSystemPrune(c *gin.Context) {
 		}
 	}
 
-	// 基于数量限额老化
+	// 1b. 按数量清理（超出限额的部分）
 	if h.config.Global.TaskRetainMax > 0 {
 		var totalCount int
 		_ = h.db.QueryRow("SELECT COUNT(*) FROM deploy_tasks").Scan(&totalCount)
@@ -63,7 +80,7 @@ func (h *APIHandler) HandleSystemPrune(c *gin.Context) {
 					var id int64
 					var pid, createdAt string
 					if err := rows.Scan(&id, &pid, &createdAt); err == nil {
-						// 避免重复
+						// 避免跟天数清理重复
 						if _, exists := taskMap[id]; !exists {
 							idsToPrune = append(idsToPrune, id)
 							taskMap[id] = [2]string{pid, createdAt}
@@ -75,7 +92,9 @@ func (h *APIHandler) HandleSystemPrune(c *gin.Context) {
 		}
 	}
 
-	// 执行"先库后盘"第一步：从数据库删除
+	// ============================================================
+	// 🗑️ 2. 先删数据库记录，再删物理文件（"先库后盘"策略）
+	// ============================================================
 	if len(idsToPrune) > 0 {
 		for _, id := range idsToPrune {
 			_, err := h.db.Exec("DELETE FROM deploy_tasks WHERE id = ?", id)
@@ -85,7 +104,7 @@ func (h *APIHandler) HandleSystemPrune(c *gin.Context) {
 		}
 	}
 
-	// 执行"先库后盘"第二步：删除对应的物理文件，并累计释放大小
+	// 删除对应的物理文件（日志 + diff 快照）
 	logDir := h.config.Global.LogPath
 	for _, id := range idsToPrune {
 		// 清理运行日志
@@ -108,8 +127,10 @@ func (h *APIHandler) HandleSystemPrune(c *gin.Context) {
 		}
 	}
 
-	// 2. 脏数据/孤儿文件物理自愈
-	// 遍历 LogPath 根目录清除孤儿日志文件
+	// ============================================================
+	// 🧹 3. 清理"孤儿文件"——数据库里没有对应记录的文件
+	// ============================================================
+	// 遍历日志目录，找日志文件
 	if files, err := os.ReadDir(logDir); err == nil {
 		for _, file := range files {
 			if !file.IsDir() && strings.HasPrefix(file.Name(), "task_") && strings.HasSuffix(file.Name(), ".log") {
@@ -119,6 +140,7 @@ func (h *APIHandler) HandleSystemPrune(c *gin.Context) {
 					var exists int
 					err := h.db.QueryRow("SELECT COUNT(*) FROM deploy_tasks WHERE id = ?", id).Scan(&exists)
 					if err == nil && exists == 0 {
+						// 数据库里没有这个任务！文件是孤儿
 						filePath := filepath.Join(logDir, file.Name())
 						if fi, statErr := os.Stat(filePath); statErr == nil {
 							freedBytes += fi.Size()
@@ -131,7 +153,7 @@ func (h *APIHandler) HandleSystemPrune(c *gin.Context) {
 		}
 	}
 
-	// 遍历 LogPath/diffs/projects 清除孤儿 diff 快照
+	// 遍历 diff 目录，找孤儿 diff 文件
 	diffsRoot := filepath.Join(logDir, "diffs", "projects")
 	_ = filepath.Walk(diffsRoot, func(path string, info os.FileInfo, err error) error {
 		if err == nil && !info.IsDir() && strings.HasPrefix(info.Name(), "task_") && strings.HasSuffix(info.Name(), "_diff.log") {
@@ -157,3 +179,20 @@ func (h *APIHandler) HandleSystemPrune(c *gin.Context) {
 		"freed_bytes":          freedBytes,
 	})
 }
+
+// ============================================================
+// 📚 面试题大全
+// ============================================================
+// 初级：
+// 1. Q: 为什么要清理旧任务？
+//    A: 不清理的话磁盘会满！日志和 diff 文件会越来越多~
+//
+// 中级：
+// 2. Q: 什么是"先库后盘"策略？
+//    A: 先删数据库记录，再删物理文件。
+//       防止先删文件但数据库没删成功导致数据不一致~
+//
+// 3. Q: 为什么要清理"孤儿文件"？
+//    A: 如果程序以前崩溃过，可能数据库删了但文件没删掉。
+//       这些没用的文件就是"孤儿"，白白占用磁盘空间~
+// ============================================================
