@@ -1,7 +1,0 @@
-[core]
-	repositoryformatversion = 0
-	filemode = false
-	bare = true
-	ignorecase = true
-[remote "origin"]
-	url = /tmp/TestEngine_MultiNodeDeploy3167849665/001

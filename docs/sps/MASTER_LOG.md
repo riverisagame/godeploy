@@ -100,3 +100,8 @@
 | 2026-05-30 | goal_multi_db | domain/infrastructure | docs/sps/plans/20260530_goal_multi_db_plan.md | IN_PROGRESS |
 | 2026-05-31 | CI-FIX | web/tests | docs/sps/plans/20260531_fix_github_action_ci.md | BUILD_SUCCESS |
 | 2026-05-31 | DDD-001 | ARCH_DDD | docs/sps/plans/20260531-ddd-full-tactical-plan.md | BUILD_SUCCESS |
+| 2026-07-19 | TASK-20260719 | SIMPLIFY | docs/sps/decisions/20260719_simplification_scope.md | PENDING |
+| 2026-07-19 | TASK-20260719 | SIMPLIFY_IR | docs/sps/plans/20260719_simplification_ir_plan.md | PLAN_LOCKED |
+| 2026-07-19 | PURGE_CODE | - | docs/sps/decisions/20260719_purge_codebase_scan.md | EVALUATING |
+|   2 0 2 6 - 0 7 - 1 9   |   U I _ S S E _ D E P L O Y   |   d e p l o y _ e n g i n e   |   d o c s / s p s / l o g s / 2 0 2 6 0 7 1 9 _ d e p l o y _ e n g i n e _ a c c e p t a n c e . m d   |   B U I L D _ S U C C E S S   |  
+ 
