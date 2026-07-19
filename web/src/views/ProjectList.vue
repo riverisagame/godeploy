@@ -1,37 +1,54 @@
 <template>
   <div class="project-list">
     <div class="header-actions">
-      <h2>项目管理</h2>
-      <el-button type="primary" @click="dialogVisible = true">新建项目</el-button>
+      <div>
+        <h2>项目管理</h2>
+        <p class="subtitle">管理所有需要发布的项目及环境配置</p>
+      </div>
+      <el-button type="primary" @click="dialogVisible = true" size="large">新建项目</el-button>
     </div>
 
-    <el-table :data="projects" border style="width: 100%; margin-top: 20px;">
-      <el-table-column prop="id" label="ID" width="80" />
-      <el-table-column prop="name" label="项目名称" width="180" />
-      <el-table-column prop="repo_url" label="Git 仓库" />
-      <el-table-column prop="keep_releases" label="保留版本数" width="120" />
-      <el-table-column label="操作" width="200">
-        <template #default="scope">
-          <el-button size="small" @click="viewEnvs(scope.row)">环境配置</el-button>
-        </template>
-      </el-table-column>
-    </el-table>
+    <el-row :gutter="24" class="project-grid" v-if="projects.length > 0">
+      <el-col :xs="24" :sm="12" :md="8" :lg="6" v-for="prj in projects" :key="prj.id" style="margin-bottom: 24px;">
+        <el-card shadow="hover" class="project-card cursor-pointer is-hover-shadow" @click="viewEnvs(prj)">
+          <div class="card-header">
+            <h3>{{ prj.name }}</h3>
+            <el-tag size="small" type="info" effect="dark" class="id-tag">ID: {{ prj.id }}</el-tag>
+          </div>
+          <div class="card-body">
+            <div class="info-row">
+              <el-icon><Link /></el-icon>
+              <span class="truncate" :title="prj.repo_url">{{ prj.repo_url }}</span>
+            </div>
+            <div class="info-row">
+              <el-icon><CopyDocument /></el-icon>
+              <span>保留版本数: <strong>{{ prj.keep_releases }}</strong></span>
+            </div>
+          </div>
+          <div class="card-footer">
+            <el-button type="primary" text bg size="small">配置环境 <el-icon class="el-icon--right"><ArrowRight /></el-icon></el-button>
+          </div>
+        </el-card>
+      </el-col>
+    </el-row>
+    
+    <el-empty v-else description="暂无项目，请点击右上角新建" :image-size="200"></el-empty>
 
     <!-- Create Project Dialog -->
-    <el-dialog title="新建项目" v-model="dialogVisible" width="500px">
-      <el-form :model="form" label-width="100px">
+    <el-dialog title="新建项目" v-model="dialogVisible" width="480px" destroy-on-close class="custom-dialog">
+      <el-form :model="form" label-position="top" class="custom-form">
         <el-form-item label="项目名称">
-          <el-input v-model="form.name" placeholder="例如: pdeploy-web"></el-input>
+          <el-input v-model="form.name" placeholder="例如: pdeploy-web" size="large"></el-input>
         </el-form-item>
         <el-form-item label="Git 仓库">
-          <el-input v-model="form.repo_url" placeholder="例如: git@github.com:..."></el-input>
+          <el-input v-model="form.repo_url" placeholder="例如: git@github.com:..." size="large"></el-input>
         </el-form-item>
       </el-form>
       <template #footer>
-        <span class="dialog-footer">
+        <div class="dialog-footer">
           <el-button @click="dialogVisible = false">取消</el-button>
           <el-button type="primary" @click="createProject" :loading="creating">确定</el-button>
-        </span>
+        </div>
       </template>
     </el-dialog>
   </div>
@@ -42,6 +59,7 @@ import { ref, onMounted } from 'vue'
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
 import { useRouter } from 'vue-router'
+import { Link, CopyDocument, ArrowRight } from '@element-plus/icons-vue'
 
 const router = useRouter()
 
@@ -94,62 +112,89 @@ onMounted(() => {
 
 <style scoped>
 .project-list {
-  padding: 24px;
+  padding: 8px;
 }
 .header-actions {
   display: flex;
   justify-content: space-between;
-  align-items: center;
-  margin-bottom: 24px;
+  align-items: flex-start;
+  margin-bottom: 32px;
 }
 h2 {
+  margin: 0 0 8px 0;
+  color: var(--text-primary);
+  font-size: 28px;
+  letter-spacing: -0.5px;
+}
+.subtitle {
   margin: 0;
-  color: var(--text-primary);
-  font-family: var(--mono);
-  font-size: 24px;
+  color: var(--text-secondary);
+  font-size: 14px;
 }
-
-:deep(.el-table) {
-  background-color: var(--bg-card);
-  border-radius: 8px;
+.project-grid {
+  margin-top: 16px;
+}
+.project-card {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+:deep(.el-card__body) {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 0 !important;
+}
+.card-header {
+  padding: 20px 20px 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+.card-header h3 {
+  margin: 0;
+  font-size: 18px;
+  color: var(--text-primary);
+  white-space: nowrap;
   overflow: hidden;
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+  text-overflow: ellipsis;
+  max-width: 70%;
 }
-
-:deep(.el-table th.el-table__cell) {
-  background-color: rgba(15, 23, 42, 0.6);
-  color: var(--text-primary);
-  font-weight: 600;
-  border-bottom: 1px solid var(--border-color);
+.id-tag {
+  background-color: rgba(148, 163, 184, 0.1);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  color: var(--text-secondary);
+  font-family: var(--mono);
 }
-
-:deep(.el-table td.el-table__cell) {
-  border-bottom: 1px solid var(--border-color);
-  background-color: var(--bg-card);
+.card-body {
+  padding: 20px;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
-
-:deep(.el-table--enable-row-hover .el-table__body tr:hover > td.el-table__cell) {
-  background-color: rgba(59, 130, 246, 0.05);
+.info-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-secondary);
+  font-size: 14px;
 }
-
-:deep(.el-dialog) {
-  background-color: var(--bg-card);
-  border: 1px solid var(--border-color);
-  border-radius: 12px;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+.info-row .el-icon {
+  color: var(--accent-blue);
+  font-size: 16px;
 }
-
-:deep(.el-dialog__title) {
-  color: var(--text-primary);
-  font-weight: 600;
+.truncate {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
-
-:deep(.el-input__wrapper) {
-  background-color: var(--bg-dark);
-  box-shadow: 0 0 0 1px var(--border-color) inset;
-}
-
-:deep(.el-input__wrapper.is-focus) {
-  box-shadow: 0 0 0 1px var(--accent-blue) inset !important;
+.card-footer {
+  padding: 12px 20px;
+  background-color: rgba(0, 0, 0, 0.2);
+  display: flex;
+  justify-content: flex-end;
+  border-top: 1px solid rgba(255, 255, 255, 0.03);
 }
 </style>
