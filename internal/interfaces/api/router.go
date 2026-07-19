@@ -34,7 +34,9 @@ func NewRouter(
 	mux.HandleFunc("POST /api/servers", serverHandler.Create)
 
 	// Deploy & Log Stream Route
+	mux.HandleFunc("GET /api/deployments", deployHandler.ListDeployments)
 	mux.HandleFunc("POST /api/deployments", deployHandler.StartDeploy)
+	mux.HandleFunc("POST /api/deployments/{id}/rollback", deployHandler.Rollback)
 	mux.HandleFunc("GET /api/deployments/{id}/logs", deployHandler.StreamLogs)
 
 	// Setup embedded static files

@@ -45,11 +45,13 @@ func (h *DeployHandler) StartDeploy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	
+	var targetProject *domain.Project
 	var env *domain.Environment
 	for _, prj := range projects {
 		if prj.ID == req.ProjectID {
 			for _, e := range prj.Environments {
 				if e.Name == req.EnvName {
+					targetProject = prj
 					env = e
 					break
 				}
@@ -58,8 +60,8 @@ func (h *DeployHandler) StartDeploy(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	
-	if env == nil {
-		http.Error(w, "environment not found", http.StatusNotFound)
+	if env == nil || targetProject == nil {
+		http.Error(w, "environment or project not found", http.StatusNotFound)
 		return
 	}
 
@@ -70,7 +72,7 @@ func (h *DeployHandler) StartDeploy(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Start deployment asynchronously in the engine
-	h.engine.StartDeploy(deployment, env)
+	h.engine.StartDeploy(deployment, targetProject, env)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
@@ -125,4 +127,91 @@ func (h *DeployHandler) StreamLogs(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+}
+
+type RollbackReq struct {
+	ProjectID     uint   `json:"project_id"`
+	EnvName       string `json:"env_name"`
+	TargetRelease string `json:"target_release"`
+}
+
+func (h *DeployHandler) Rollback(w http.ResponseWriter, r *http.Request) {
+	parts := strings.Split(r.URL.Path, "/")
+	if len(parts) < 4 {
+		http.Error(w, "invalid path", http.StatusBadRequest)
+		return
+	}
+	deployIDStr := parts[3]
+	_, err := strconv.ParseUint(deployIDStr, 10, 32)
+	if err != nil {
+		http.Error(w, "invalid deployment ID", http.StatusBadRequest)
+		return
+	}
+
+	var req RollbackReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	projects, err := h.prjSvc.GetProjects()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	var targetProject *domain.Project
+	var env *domain.Environment
+	for _, prj := range projects {
+		if prj.ID == req.ProjectID {
+			for _, e := range prj.Environments {
+				if e.Name == req.EnvName {
+					targetProject = prj
+					env = e
+					break
+				}
+			}
+			break
+		}
+	}
+
+	if env == nil || targetProject == nil {
+		http.Error(w, "environment or project not found", http.StatusNotFound)
+		return
+	}
+
+	// Trigger a new deployment record for the rollback
+	deployment, err := h.svc.TriggerDeploy(req.ProjectID, 1, "ROLLBACK_TO_"+req.TargetRelease)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	h.engine.Rollback(deployment, env, req.TargetRelease)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(deployment)
+}
+
+func (h *DeployHandler) ListDeployments(w http.ResponseWriter, r *http.Request) {
+	envIDStr := r.URL.Query().Get("env_id")
+	if envIDStr == "" {
+		http.Error(w, "env_id query parameter is required", http.StatusBadRequest)
+		return
+	}
+	envID, err := strconv.ParseUint(envIDStr, 10, 32)
+	if err != nil {
+		http.Error(w, "invalid env_id", http.StatusBadRequest)
+		return
+	}
+
+	deployments, err := h.svc.GetDeploymentsByEnv(uint(envID))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(deployments)
 }

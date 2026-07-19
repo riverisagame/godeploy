@@ -6,10 +6,12 @@ import (
 )
 
 type ServerModel struct {
-	ID   uint   `gorm:"primaryKey"`
-	Name string
-	IP   string
-	Port int
+	ID      uint   `gorm:"primaryKey"`
+	Name    string
+	IP      string
+	Port    int
+	User    string
+	KeyPath string
 }
 
 type SqliteServerRepository struct {
@@ -22,10 +24,12 @@ func NewSqliteServerRepository(db *gorm.DB) *SqliteServerRepository {
 
 func (r *SqliteServerRepository) Save(s *domain.Server) error {
 	m := &ServerModel{
-		ID:   s.ID,
-		Name: s.Name,
-		IP:   s.IP,
-		Port: s.Port,
+		ID:      s.ID,
+		Name:    s.Name,
+		IP:      s.IP,
+		Port:    s.Port,
+		User:    s.User,
+		KeyPath: s.KeyPath,
 	}
 
 	if err := r.db.Save(m).Error; err != nil {
@@ -44,10 +48,12 @@ func (r *SqliteServerRepository) FindAll() ([]*domain.Server, error) {
 	var res []*domain.Server
 	for _, m := range models {
 		res = append(res, &domain.Server{
-			ID:   m.ID,
-			Name: m.Name,
-			IP:   m.IP,
-			Port: m.Port,
+			ID:      m.ID,
+			Name:    m.Name,
+			IP:      m.IP,
+			Port:    m.Port,
+			User:    m.User,
+			KeyPath: m.KeyPath,
 		})
 	}
 	return res, nil
@@ -59,9 +65,12 @@ func (r *SqliteServerRepository) FindByID(id uint) (*domain.Server, error) {
 		return nil, err
 	}
 	return &domain.Server{
-		ID:   m.ID,
-		Name: m.Name,
-		IP:   m.IP,
-		Port: m.Port,
+		ID:      m.ID,
+		Name:    m.Name,
+		IP:      m.IP,
+		Port:    m.Port,
+		User:    m.User,
+		KeyPath: m.KeyPath,
 	}, nil
 }
+

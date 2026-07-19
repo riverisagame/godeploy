@@ -3,13 +3,13 @@ package domain
 import "errors"
 
 type Deployment struct {
-	ID         uint
-	EnvID      uint
-	UserID     uint
-	CommitHash string
-	Status     string
-	Phase      string
-	Log        string
+	ID         uint   `json:"id"`
+	EnvID      uint   `json:"env_id"`
+	UserID     uint   `json:"user_id"`
+	CommitHash string `json:"commit_hash"`
+	Status     string `json:"status"` // pending, running, success, failed
+	Phase      string `json:"phase"`
+	Log        string `json:"log"`
 }
 
 func NewDeployment(envID, userID uint, commitHash string) (*Deployment, error) {

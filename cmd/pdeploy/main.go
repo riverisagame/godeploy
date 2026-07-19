@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"pdeploy"
 	"pdeploy/internal/application"
+	"pdeploy/internal/infrastructure/git"
 	"pdeploy/internal/infrastructure/persistence"
 	"pdeploy/internal/infrastructure/ssh"
 	"pdeploy/internal/interfaces/api"
@@ -38,11 +39,9 @@ func main() {
 	projectSvc := application.NewProjectService(projectRepo)
 	deploySvc := application.NewDeployService(deployRepo)
 
-	sshClient, err := ssh.NewClient()
-	if err != nil {
-		log.Println("Warning: failed to init SSH client with default key, deployments may fail", err)
-	}
-	deployEngine := application.NewDeployEngine(sshClient, serverRepo)
+	sshClient := ssh.NewClient()
+	gitClient := git.NewClient("./workspace")
+	deployEngine := application.NewDeployEngine(sshClient, gitClient, serverRepo, deploySvc)
 
 	// 3. Initialize Interfaces
 	router := api.NewRouter(projectSvc, serverRepo, deploySvc, deployEngine, pdeploy.StaticFS)

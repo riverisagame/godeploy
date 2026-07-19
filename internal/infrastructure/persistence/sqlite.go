@@ -1,6 +1,7 @@
 package persistence
 
 import (
+	"encoding/json"
 	"pdeploy/internal/domain"
 	"gorm.io/gorm"
 )
@@ -22,6 +23,8 @@ type EnvironmentModel struct {
 	DeployType string
 	PreDeploy  string
 	PostDeploy string
+	ServerIDs  string // JSON 序列化的 []uint
+	DeployPath string
 }
 
 type SqliteProjectRepository struct {
@@ -43,12 +46,21 @@ func toDomainProject(pm *ProjectModel) *domain.Project {
 		Environments: make([]*domain.Environment, 0),
 	}
 	for _, em := range pm.Environments {
+		var serverIDs []uint
+		if em.ServerIDs != "" {
+			json.Unmarshal([]byte(em.ServerIDs), &serverIDs)
+		}
+		if serverIDs == nil {
+			serverIDs = make([]uint, 0)
+		}
 		p.Environments = append(p.Environments, &domain.Environment{
 			Name:       em.Name,
 			Branch:     em.Branch,
 			DeployType: em.DeployType,
 			PreDeploy:  em.PreDeploy,
 			PostDeploy: em.PostDeploy,
+			ServerIDs:  serverIDs,
+			DeployPath: em.DeployPath,
 		})
 	}
 	return p
@@ -63,12 +75,15 @@ func toProjectModel(p *domain.Project) *ProjectModel {
 		Environments: make([]EnvironmentModel, 0),
 	}
 	for _, env := range p.Environments {
+		srvJSON, _ := json.Marshal(env.ServerIDs)
 		pm.Environments = append(pm.Environments, EnvironmentModel{
 			Name:       env.Name,
 			Branch:     env.Branch,
 			DeployType: env.DeployType,
 			PreDeploy:  env.PreDeploy,
 			PostDeploy: env.PostDeploy,
+			ServerIDs:  string(srvJSON),
+			DeployPath: env.DeployPath,
 		})
 	}
 	return pm

@@ -26,6 +26,16 @@ func (m *mockDeployRepo) FindByID(id uint) (*domain.Deployment, error) {
 	return nil, nil
 }
 
+func (m *mockDeployRepo) FindByEnvID(envID uint) ([]*domain.Deployment, error) {
+	var res []*domain.Deployment
+	for _, d := range m.deployments {
+		if d.EnvID == envID {
+			res = append(res, d)
+		}
+	}
+	return res, nil
+}
+
 func TestDeployService_TriggerDeploy(t *testing.T) {
 	repo := &mockDeployRepo{deployments: make(map[uint]*domain.Deployment)}
 	svc := NewDeployService(repo)

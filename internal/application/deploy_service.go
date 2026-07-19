@@ -46,3 +46,7 @@ func (s *DeployService) CompleteDeploy(id uint, success bool, log string) error 
 
 	return s.repo.Save(d)
 }
+
+func (s *DeployService) GetDeploymentsByEnv(envID uint) ([]*domain.Deployment, error) {
+	return s.repo.FindByEnvID(envID)
+}

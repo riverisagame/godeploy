@@ -3,10 +3,12 @@ package domain
 import "errors"
 
 type Server struct {
-	ID   uint
-	Name string
-	IP   string
-	Port int
+	ID      uint   `json:"id"`
+	Name    string `json:"name"`
+	IP      string `json:"ip"`
+	Port    int    `json:"port"`
+	User    string `json:"user"`     // SSH 用户名，默认 root
+	KeyPath string `json:"key_path"` // SSH 私钥路径，空则使用默认 ~/.ssh/id_rsa
 }
 
 func NewServer(name, ip string, port int) (*Server, error) {
@@ -24,5 +26,6 @@ func NewServer(name, ip string, port int) (*Server, error) {
 		Name: name,
 		IP:   ip,
 		Port: port,
+		User: "root",
 	}, nil
 }

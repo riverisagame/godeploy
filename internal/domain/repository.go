@@ -14,4 +14,5 @@ type EnvironmentRepository interface {
 type DeploymentRepository interface {
 	Save(d *Deployment) error
 	FindByID(id uint) (*Deployment, error)
+	FindByEnvID(envID uint) ([]*Deployment, error)
 }
