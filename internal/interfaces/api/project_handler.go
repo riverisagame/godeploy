@@ -37,7 +37,7 @@ func (h *ProjectHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(p)
+	RespondJSON(w, p)
 }
 
 func (h *ProjectHandler) List(w http.ResponseWriter, r *http.Request) {
@@ -52,7 +52,7 @@ func (h *ProjectHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(projects)
+	RespondJSON(w, projects)
 }
 
 type AddEnvReq struct {
@@ -84,14 +84,15 @@ func (h *ProjectHandler) AddEnvironment(w http.ResponseWriter, r *http.Request) 
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(p)
+	RespondJSON(w, p)
 }
 
 type UpdateEnvReq struct {
 	PreDeploy  string `json:"pre_deploy"`
 	PostDeploy string `json:"post_deploy"`
-	ServerIDs  []uint `json:"server_ids"`
-	DeployPath string `json:"deploy_path"`
+	ServerIDs  []uint          `json:"server_ids"`
+	DeployPath string          `json:"deploy_path"`
+	EnvVars    []domain.EnvVar `json:"env_vars"`
 }
 
 func (h *ProjectHandler) UpdateEnvironment(w http.ResponseWriter, r *http.Request) {
@@ -110,12 +111,12 @@ func (h *ProjectHandler) UpdateEnvironment(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	p, err := h.svc.UpdateEnvironment(uint(id), envName, req.PreDeploy, req.PostDeploy, req.DeployPath, req.ServerIDs)
+	p, err := h.svc.UpdateEnvironment(uint(id), envName, req.PreDeploy, req.PostDeploy, req.DeployPath, req.ServerIDs, req.EnvVars)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(p)
+	RespondJSON(w, p)
 }

@@ -7,7 +7,7 @@ import (
 
 type ServerModel struct {
 	ID      uint   `gorm:"primaryKey"`
-	Name    string
+	Name    string `gorm:"uniqueIndex"`
 	IP      string
 	Port    int
 	User    string
@@ -72,5 +72,9 @@ func (r *SqliteServerRepository) FindByID(id uint) (*domain.Server, error) {
 		User:    m.User,
 		KeyPath: m.KeyPath,
 	}, nil
+}
+
+func (r *SqliteServerRepository) Delete(id uint) error {
+	return r.db.Delete(&ServerModel{}, id).Error
 }
 

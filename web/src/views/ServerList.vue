@@ -35,8 +35,8 @@
           </template>
         </el-table-column>
         <el-table-column label="操作" width="120" align="center">
-          <template #default>
-            <el-button size="small" type="danger" text bg>删除</el-button>
+          <template #default="scope">
+            <el-button size="small" type="danger" text bg @click="handleDelete(scope.row)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -85,11 +85,12 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import axios from 'axios'
-import { ElMessage } from 'element-plus'
+import { api } from '../api'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { Monitor } from '@element-plus/icons-vue'
+import type { Server } from '../types'
 
-const servers = ref<any[]>([])
+const servers = ref<Server[]>([])
 const dialogVisible = ref(false)
 const creating = ref(false)
 
@@ -103,7 +104,7 @@ const form = ref({
 
 const fetchServers = async () => {
   try {
-    const res = await axios.get('/api/servers')
+    const res = await api.getServers()
     servers.value = res.data
   } catch (e) {
     ElMessage.error('获取服务器列表失败')
@@ -118,7 +119,7 @@ const createServer = async () => {
   
   creating.value = true
   try {
-    const res = await axios.post('/api/servers', form.value)
+    const res = await api.createServer(form.value)
     ElMessage.success('创建成功')
     servers.value.push(res.data)
     dialogVisible.value = false
@@ -131,6 +132,24 @@ const createServer = async () => {
     ElMessage.error(e.response?.data || '创建失败')
   } finally {
     creating.value = false
+  }
+}
+
+const handleDelete = async (server: Server) => {
+  try {
+    await ElMessageBox.confirm(`确定要删除服务器 ${server.name} 吗？`, '提示', {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+    
+    await api.deleteServer(server.id)
+    ElMessage.success('删除成功')
+    await fetchServers()
+  } catch (e: any) {
+    if (e !== 'cancel') {
+      ElMessage.error(e.response?.data || '删除失败')
+    }
   }
 }
 

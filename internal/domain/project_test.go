@@ -41,3 +41,25 @@ func TestAddEnvironment(t *testing.T) {
 		t.Errorf("Expected error 'environment name cannot be empty', got %v", err)
 	}
 }
+
+func TestEnvironmentEnvVars(t *testing.T) {
+	// @Ref: docs/sps/plans/20260720_env_vars_ir.md | @Date: 2026-07-20
+	p, _ := NewProject("demo", "git@github.com:demo/demo.git")
+	p.AddEnvironment("prod", "main", "symlink")
+	env := p.Environments[0]
+	
+	if len(env.EnvVars) != 0 {
+		t.Fatalf("Expected 0 env vars initially")
+	}
+
+	env.AddEnvVar("DB_HOST", "localhost", false)
+	env.AddEnvVar("DB_PASS", "secret", true)
+
+	if len(env.EnvVars) != 2 {
+		t.Fatalf("Expected 2 env vars")
+	}
+
+	if env.EnvVars[0].Key != "DB_HOST" || env.EnvVars[1].IsSecret != true {
+		t.Errorf("Env var fields mismatch")
+	}
+}

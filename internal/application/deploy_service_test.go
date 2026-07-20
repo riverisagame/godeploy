@@ -36,9 +36,24 @@ func (m *mockDeployRepo) FindByEnvID(envID uint) ([]*domain.Deployment, error) {
 	return res, nil
 }
 
+type mockDeployProjectRepo struct {
+	projects map[uint]*domain.Project
+}
+func (m *mockDeployProjectRepo) Save(p *domain.Project) error { return nil }
+func (m *mockDeployProjectRepo) FindByID(id uint) (*domain.Project, error) { return m.projects[id], nil }
+func (m *mockDeployProjectRepo) FindAll() ([]*domain.Project, error) { return nil, nil }
+
+type mockGitClient struct{}
+func (m *mockGitClient) CloneOrPull(r, b, p string, l chan<- string) (string, error) { return "", nil }
+func (m *mockGitClient) FetchAndGetCommits(r, b, p, f string) ([]domain.CommitInfo, error) {
+	return []domain.CommitInfo{{Hash: "123"}}, nil
+}
+
 func TestDeployService_TriggerDeploy(t *testing.T) {
 	repo := &mockDeployRepo{deployments: make(map[uint]*domain.Deployment)}
-	svc := NewDeployService(repo)
+	projRepo := &mockDeployProjectRepo{projects: make(map[uint]*domain.Project)}
+	gitClient := &mockGitClient{}
+	svc := NewDeployService(repo, projRepo, gitClient)
 
 	// Test invalid input
 	_, err := svc.TriggerDeploy(0, 1, "hash123")
@@ -61,11 +76,13 @@ func TestDeployService_TriggerDeploy(t *testing.T) {
 
 func TestDeployService_CompleteDeploy(t *testing.T) {
 	repo := &mockDeployRepo{deployments: make(map[uint]*domain.Deployment)}
-	svc := NewDeployService(repo)
+	projRepo := &mockProjectRepo{projects: make(map[uint]*domain.Project)}
+	gitClient := &mockGitClient{}
+	svc := NewDeployService(repo, projRepo, gitClient)
 	
 	d, _ := svc.TriggerDeploy(1, 1, "hash123")
 	
-	err := svc.CompleteDeploy(d.ID, true, "deployed successfully")
+	err := svc.CompleteDeploy(d.ID, true, "deployed successfully", "release_v1")
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
 	}
@@ -76,5 +93,8 @@ func TestDeployService_CompleteDeploy(t *testing.T) {
 	}
 	if saved.Log != "deployed successfully" {
 		t.Errorf("Expected log 'deployed successfully', got '%s'", saved.Log)
+	}
+	if saved.ReleaseName != "release_v1" {
+		t.Errorf("Expected release name 'release_v1', got '%s'", saved.ReleaseName)
 	}
 }

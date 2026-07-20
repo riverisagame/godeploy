@@ -65,7 +65,8 @@ func (h *DeployHandler) StartDeploy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	deployment, err := h.svc.TriggerDeploy(req.ProjectID, 1, req.CommitHash) // 1 is mock UserID
+	userID, _ := r.Context().Value(ContextKeyUserID).(float64)
+	deployment, err := h.svc.TriggerDeploy(env.ID, uint(userID), req.CommitHash)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -76,7 +77,7 @@ func (h *DeployHandler) StartDeploy(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(deployment)
+	RespondJSON(w, deployment)
 }
 
 // SSEEndpoint handling realtime logs
@@ -180,8 +181,9 @@ func (h *DeployHandler) Rollback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	userID, _ := r.Context().Value(ContextKeyUserID).(float64)
 	// Trigger a new deployment record for the rollback
-	deployment, err := h.svc.TriggerDeploy(req.ProjectID, 1, "ROLLBACK_TO_"+req.TargetRelease)
+	deployment, err := h.svc.TriggerDeploy(env.ID, uint(userID), "ROLLBACK_TO_"+req.TargetRelease)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -191,7 +193,7 @@ func (h *DeployHandler) Rollback(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(deployment)
+	RespondJSON(w, deployment)
 }
 
 func (h *DeployHandler) ListDeployments(w http.ResponseWriter, r *http.Request) {
@@ -213,5 +215,50 @@ func (h *DeployHandler) ListDeployments(w http.ResponseWriter, r *http.Request) 
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(deployments)
+	RespondJSON(w, deployments)
+}
+
+func (h *DeployHandler) GetDiff(w http.ResponseWriter, r *http.Request) {
+	parts := strings.Split(r.URL.Path, "/")
+	if len(parts) < 6 {
+		http.Error(w, "invalid path", http.StatusBadRequest)
+		return
+	}
+	projectID, _ := strconv.Atoi(parts[3])
+	envName := parts[5]
+
+	projects, err := h.prjSvc.GetProjects()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	var targetProject *domain.Project
+	var env *domain.Environment
+	for _, prj := range projects {
+		if prj.ID == uint(projectID) {
+			for _, e := range prj.Environments {
+				if e.Name == envName {
+					targetProject = prj
+					env = e
+					break
+				}
+			}
+			break
+		}
+	}
+
+	if env == nil || targetProject == nil {
+		http.Error(w, "environment or project not found", http.StatusNotFound)
+		return
+	}
+
+	diff, err := h.svc.GetEnvironmentDiff(uint(projectID), envName)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	RespondJSON(w, diff)
 }

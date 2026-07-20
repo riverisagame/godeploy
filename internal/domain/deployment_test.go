@@ -30,11 +30,14 @@ func TestNewDeployment(t *testing.T) {
 		t.Errorf("Expected phase 'pre_deploy', got '%s'", d.Phase)
 	}
 	
-	d.MarkSuccess("deployed ok")
+	d.MarkSuccess("deployed ok", "release_v1")
 	if d.Status != "success" {
 		t.Errorf("Expected status 'success', got '%s'", d.Status)
 	}
 	if d.Log != "deployed ok" {
 		t.Errorf("Expected log 'deployed ok', got '%s'", d.Log)
+	}
+	if d.ReleaseName != "release_v1" {
+		t.Errorf("Expected release name 'release_v1', got '%s'", d.ReleaseName)
 	}
 }

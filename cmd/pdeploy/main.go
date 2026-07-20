@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"pdeploy"
 	"pdeploy/internal/application"
+	"pdeploy/internal/config"
 	"pdeploy/internal/infrastructure/git"
 	"pdeploy/internal/infrastructure/persistence"
 	"pdeploy/internal/infrastructure/ssh"
@@ -15,8 +16,10 @@ import (
 )
 
 func main() {
+	cfg := config.Load()
+
 	// 1. Initialize Infrastructure
-	db, err := gorm.Open(sqlite.Open("pdeploy.db"), &gorm.Config{})
+	db, err := gorm.Open(sqlite.Open(cfg.DBPath), &gorm.Config{})
 	if err != nil {
 		log.Fatal("Failed to open DB:", err)
 	}
@@ -26,6 +29,7 @@ func main() {
 		&persistence.EnvironmentModel{},
 		&persistence.ServerModel{},
 		&persistence.DeploymentModel{},
+		&persistence.UserModel{},
 	)
 	if err != nil {
 		log.Fatal("Failed to auto-migrate:", err)
@@ -37,17 +41,22 @@ func main() {
 
 	// 2. Initialize Application Services
 	projectSvc := application.NewProjectService(projectRepo)
-	deploySvc := application.NewDeployService(deployRepo)
-
 	sshClient := ssh.NewClient()
-	gitClient := git.NewClient("./workspace")
-	deployEngine := application.NewDeployEngine(sshClient, gitClient, serverRepo, deploySvc)
+	gitClient := git.NewClient(cfg.WorkspaceDir)
+
+	userRepo := persistence.NewSqliteUserRepository(db)
+	authSvc := application.NewAuthService(userRepo, cfg.JWTSecret)
+	serverSvc := application.NewServerService(serverRepo)
+
+	deploySvc := application.NewDeployService(deployRepo, projectRepo, gitClient)
+	deployEngine := application.NewDeployEngine(sshClient, gitClient, serverSvc, deploySvc)
 
 	// 3. Initialize Interfaces
-	router := api.NewRouter(projectSvc, serverRepo, deploySvc, deployEngine, pdeploy.StaticFS)
+	router := api.NewRouter(projectSvc, serverSvc, deploySvc, deployEngine, authSvc, pdeploy.StaticFS)
 
-	log.Println("pdeploy server starting on :8080...")
-	err = http.ListenAndServe(":8080", router)
+	addr := ":" + cfg.Port
+	log.Printf("pdeploy server starting on %s...\n", addr)
+	err = http.ListenAndServe(addr, router)
 	if err != nil {
 		log.Fatal("Server failed:", err)
 	}

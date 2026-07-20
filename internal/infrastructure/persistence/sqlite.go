@@ -12,19 +12,20 @@ type ProjectModel struct {
 	Name         string `gorm:"uniqueIndex"`
 	RepoURL      string
 	KeepReleases int
-	Environments []EnvironmentModel `gorm:"foreignKey:ProjectID"`
+	Environments []EnvironmentModel `gorm:"foreignKey:ProjectID;constraint:OnDelete:CASCADE;"`
 }
 
 type EnvironmentModel struct {
 	ID         uint   `gorm:"primaryKey"`
-	ProjectID  uint   `gorm:"index"`
-	Name       string
+	ProjectID  uint   `gorm:"uniqueIndex:idx_project_env_name;index"`
+	Name       string `gorm:"uniqueIndex:idx_project_env_name"`
 	Branch     string
 	DeployType string
 	PreDeploy  string
 	PostDeploy string
 	ServerIDs  string // JSON 序列化的 []uint
 	DeployPath string
+	EnvVars    string // JSON 序列化的 []domain.EnvVar
 }
 
 type SqliteProjectRepository struct {
@@ -53,7 +54,15 @@ func toDomainProject(pm *ProjectModel) *domain.Project {
 		if serverIDs == nil {
 			serverIDs = make([]uint, 0)
 		}
+		var envVars []domain.EnvVar
+		if em.EnvVars != "" {
+			json.Unmarshal([]byte(em.EnvVars), &envVars)
+		}
+		if envVars == nil {
+			envVars = make([]domain.EnvVar, 0)
+		}
 		p.Environments = append(p.Environments, &domain.Environment{
+			ID:         em.ID,
 			Name:       em.Name,
 			Branch:     em.Branch,
 			DeployType: em.DeployType,
@@ -61,6 +70,7 @@ func toDomainProject(pm *ProjectModel) *domain.Project {
 			PostDeploy: em.PostDeploy,
 			ServerIDs:  serverIDs,
 			DeployPath: em.DeployPath,
+			EnvVars:    envVars,
 		})
 	}
 	return p
@@ -76,7 +86,9 @@ func toProjectModel(p *domain.Project) *ProjectModel {
 	}
 	for _, env := range p.Environments {
 		srvJSON, _ := json.Marshal(env.ServerIDs)
+		envVarsJSON, _ := json.Marshal(env.EnvVars)
 		pm.Environments = append(pm.Environments, EnvironmentModel{
+			ID:         env.ID,
 			Name:       env.Name,
 			Branch:     env.Branch,
 			DeployType: env.DeployType,
@@ -84,6 +96,7 @@ func toProjectModel(p *domain.Project) *ProjectModel {
 			PostDeploy: env.PostDeploy,
 			ServerIDs:  string(srvJSON),
 			DeployPath: env.DeployPath,
+			EnvVars:    string(envVarsJSON),
 		})
 	}
 	return pm

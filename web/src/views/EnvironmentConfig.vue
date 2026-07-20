@@ -54,12 +54,44 @@
                 </el-form-item>
               </el-col>
             </el-row>
+
+            <el-row :gutter="24" style="margin-top: 16px;">
+              <el-col :span="12">
+                <el-form-item label="部署目标路径 (Deploy Path)">
+                  <el-input v-model="env.deploy_path" placeholder="例如: /var/www/html/myapp"></el-input>
+                </el-form-item>
+              </el-col>
+              <el-col :span="12">
+                <el-form-item label="关联服务器">
+                  <el-select v-model="env.server_ids" multiple placeholder="请选择要部署的服务器" style="width: 100%;">
+                    <el-option
+                      v-for="server in allServers"
+                      :key="server.id"
+                      :label="server.name + ' (' + server.ip + ')'"
+                      :value="server.id">
+                    </el-option>
+                  </el-select>
+                </el-form-item>
+              </el-col>
+            </el-row>
+
+            <!-- @Ref: docs/sps/plans/20260720_system_health_ir.md | @Date: 2026-07-20 -->
+            <EnvVarEditor v-model="env.env_vars" />
+
             <div class="action-footer">
-              <el-button type="primary" @click="saveHooks(env)">保存脚本</el-button>
+              <el-button type="primary" @click="saveConfig(env)">保存配置</el-button>
               <el-button type="success" @click="startDeploy(env)">
                 <el-icon class="el-icon--left"><Promotion /></el-icon> 立即部署
               </el-button>
             </div>
+
+            <!-- @Ref: docs/sps/plans/20260720_system_health_ir.md | @Date: 2026-07-20 -->
+            <DeployHistory 
+              :env="env" 
+              :deployments="env.deployments || []" 
+              :projectId="projectId" 
+              @refresh="fetchDeployHistory(env)" 
+            />
           </el-form>
         </div>
       </el-collapse-item>
@@ -96,24 +128,69 @@
         </div>
       </template>
     </el-dialog>
+
+    <!-- Pre-Deploy Diff Dialog -->
+    <el-dialog title="部署前确认 (Commit Diff)" v-model="diffDialogVisible" width="640px" destroy-on-close class="custom-dialog">
+      <div v-if="loadingDiff" style="text-align: center; padding: 40px; color: var(--text-secondary);">
+        <el-icon class="is-loading" :size="24"><Loading /></el-icon>
+        <p>正在获取变更记录...</p>
+      </div>
+      <div v-else>
+        <div v-if="diffCommits.length > 0">
+          <p style="color: var(--text-secondary); margin-bottom: 16px;">以下是自上次成功部署以来的代码变更：</p>
+          <div class="commit-list">
+            <div v-for="commit in diffCommits" :key="commit.hash" class="commit-item">
+              <div class="commit-header">
+                <span class="commit-hash"><el-icon><CopyDocument /></el-icon> {{ commit.hash.substring(0, 7) }}</span>
+                <span class="commit-author"><el-icon><User /></el-icon> {{ commit.author }}</span>
+                <span class="commit-time"><el-icon><Clock /></el-icon> {{ new Date(commit.date).toLocaleString() }}</span>
+              </div>
+              <div class="commit-msg">{{ commit.message }}</div>
+            </div>
+          </div>
+        </div>
+        <div v-else>
+          <el-alert title="太棒了！或者...等等？" description="没有发现新的代码变更。您可以强制触发部署，或者取消操作。" type="info" show-icon :closable="false" style="margin-bottom: 16px; background-color: rgba(255, 255, 255, 0.05); border: 1px solid var(--border-color); color: var(--text-primary);" />
+        </div>
+      </div>
+      <template #footer>
+        <div class="dialog-footer">
+          <el-button @click="diffDialogVisible = false">取消</el-button>
+          <el-button type="success" @click="confirmDeploy" :loading="triggeringDeploy">
+            <el-icon class="el-icon--left"><Promotion /></el-icon> 确定部署 (Latest)
+          </el-button>
+        </div>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import axios from 'axios'
-import { ElMessage, ElMessageBox } from 'element-plus'
-import { VideoPlay, VideoPause, Promotion, CopyDocument } from '@element-plus/icons-vue'
+import { api } from '../api'
+import { ElMessage } from 'element-plus'
+import { VideoPlay, VideoPause, Promotion, CopyDocument, Loading, User, Clock } from '@element-plus/icons-vue'
+import EnvVarEditor from '../components/EnvVarEditor.vue'
+import DeployHistory from '../components/DeployHistory.vue'
 
 const route = useRoute()
 const router = useRouter()
 const projectId = route.params.id
 
-const environments = ref<any[]>([])
+import type { Environment, CommitInfo, Project, Server } from '../types'
+
+const environments = ref<Environment[]>([])
+const allServers = ref<Server[]>([])
 const dialogVisible = ref(false)
 const creating = ref(false)
 const activeNames = ref<string[]>([])
+
+const diffDialogVisible = ref(false)
+const loadingDiff = ref(false)
+const diffCommits = ref<CommitInfo[]>([])
+const triggeringDeploy = ref(false)
+const currentDeployEnv = ref<Environment | null>(null)
 
 const form = ref({
   name: '',
@@ -123,16 +200,26 @@ const form = ref({
 
 const fetchEnvironments = async () => {
   try {
-    const res = await axios.get('/api/projects')
-    const currentProject = res.data.find((p: any) => p.id == projectId)
+    const res = await api.getProjects()
+    const currentProject = res.data.find((p: Project) => p.id === parseInt(projectId as string))
     if (currentProject && currentProject.environments) {
       environments.value = currentProject.environments
+      environments.value.forEach(env => fetchDeployHistory(env))
       if (environments.value.length > 0) {
         activeNames.value = [environments.value[0].name]
       }
     }
   } catch (e) {
     ElMessage.error('获取环境列表失败')
+  }
+}
+
+const fetchAllServers = async () => {
+  try {
+    const res = await api.getServers()
+    allServers.value = res.data
+  } catch (e) {
+    console.error('Failed to load servers', e)
   }
 }
 
@@ -144,9 +231,9 @@ const addEnvironment = async () => {
   
   creating.value = true
   try {
-    const res = await axios.post(`/api/projects/${projectId}/environments`, form.value)
+    const res = await api.createEnvironment(projectId as string, form.value)
     ElMessage.success('创建环境成功')
-    environments.value = res.data.environments
+    environments.value = res.data.environments || []
     dialogVisible.value = false
     activeNames.value.push(form.value.name)
     form.value.name = ''
@@ -157,47 +244,74 @@ const addEnvironment = async () => {
   }
 }
 
-const saveHooks = async (env: any) => {
+
+
+const saveConfig = async (env: Environment) => {
   try {
-    await axios.put(`/api/projects/${projectId}/environments/${env.name}`, {
+    await api.updateEnvironment(projectId as string, env.name, {
       pre_deploy: env.pre_deploy,
-      post_deploy: env.post_deploy
+      post_deploy: env.post_deploy,
+      deploy_path: env.deploy_path,
+      server_ids: env.server_ids,
+      env_vars: env.env_vars || []
     })
-    ElMessage.success(`${env.name} 环境 Hook 脚本保存成功`)
+    ElMessage.success(`${env.name} 环境配置保存成功`)
   } catch (e: any) {
     ElMessage.error(e.response?.data || '保存失败')
   }
 }
-
-const startDeploy = async (env: any) => {
+const startDeploy = async (env: Environment) => {
+  currentDeployEnv.value = env
+  diffDialogVisible.value = true
+  loadingDiff.value = true
+  diffCommits.value = []
+  
   try {
-    await ElMessageBox.confirm(`确定要部署环境 [${env.name}] 吗？\n部署分支: ${env.branch}`, '部署确认', {
-      confirmButtonText: '确定部署',
-      cancelButtonText: '取消',
-      type: 'warning',
-    })
-    
-    const commitHash = "latest" 
-    
-    const res = await axios.post('/api/deployments', {
-      project_id: parseInt(projectId as string),
-      env_name: env.name,
-      commit_hash: commitHash
-    })
-    
-    const deployId = res.data.ID
-    ElMessage.success('已触发部署，正在前往控制台...')
-    router.push(`/deployments/${deployId}`)
-    
+    const res = await api.getEnvironmentDiff(projectId as string, env.name)
+    diffCommits.value = res.data || []
   } catch (e: any) {
-    if (e !== 'cancel') {
-      ElMessage.error(e.response?.data || '触发部署失败')
-    }
+    ElMessage.warning('获取 Diff 失败，可能是首次部署，允许继续部署。')
+  } finally {
+    loadingDiff.value = false
   }
 }
 
+const confirmDeploy = async () => {
+  if (!currentDeployEnv.value) return
+  const env = currentDeployEnv.value
+  
+  triggeringDeploy.value = true
+  try {
+    const commitHash = "latest" 
+    
+    const res = await api.createDeployment(projectId as string, env.name, commitHash)
+    
+    const deployId = res.data.id
+    ElMessage.success('已触发部署，正在前往控制台...')
+    diffDialogVisible.value = false
+    router.push(`/deployments/${deployId}`)
+    
+  } catch (e: any) {
+    ElMessage.error(e.response?.data || '触发部署失败')
+  } finally {
+    triggeringDeploy.value = false
+  }
+}
+
+const fetchDeployHistory = async (env: Environment) => {
+  try {
+    const res = await api.getDeployments(env.id)
+    env.deployments = res.data
+  } catch (e) {
+    console.error('获取历史失败', e)
+  }
+}
+
+
+
 onMounted(() => {
   fetchEnvironments()
+  fetchAllServers()
 })
 </script>
 
@@ -306,6 +420,50 @@ h2 {
   gap: 12px;
 }
 
+.history-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.history-header h3 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 16px;
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+.section-header h3 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+:deep(.custom-table) {
+  background-color: #0d1117;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+}
+:deep(.custom-table th.el-table__cell) {
+  background-color: rgba(255, 255, 255, 0.02);
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border-color);
+}
+:deep(.custom-table td.el-table__cell) {
+  border-bottom: 1px solid var(--border-color);
+}
+:deep(.custom-table .el-table__row:hover > td.el-table__cell) {
+  background-color: rgba(255, 255, 255, 0.05);
+}
+
 :deep(.code-textarea .el-textarea__inner) {
   background-color: #0d1117;
   color: #a6e22e;
@@ -335,5 +493,56 @@ h2 {
 :deep(.custom-form .el-form-item__label) {
   color: var(--text-secondary);
   padding-bottom: 4px;
+}
+
+.commit-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.commit-item {
+  background-color: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.commit-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 8px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.commit-hash {
+  font-family: var(--mono);
+  color: var(--accent-blue);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.commit-author {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.commit-time {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.commit-msg {
+  font-size: 14px;
+  color: var(--text-primary);
+  line-height: 1.5;
+  white-space: pre-wrap;
 }
 </style>

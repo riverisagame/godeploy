@@ -5,7 +5,7 @@ import "testing"
 // TestNewServerWithAuth 验证 Server 能携带 SSH 认证信息
 // RED 阶段：NewServer 签名还没有 user 参数，应该编译失败或字段不存在
 func TestNewServerWithAuth(t *testing.T) {
-	srv, err := NewServer("web-01", "192.168.1.100", 22)
+	srv, err := NewServer("web-01", "192.168.1.100", 22, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -23,13 +23,16 @@ func TestNewServerWithAuth(t *testing.T) {
 
 // TestServerCustomAuth 验证可以设定自定义 SSH 用户和密钥
 func TestServerCustomAuth(t *testing.T) {
-	srv, err := NewServer("db-01", "10.0.0.50", 2222)
+	srv, err := NewServer("db-01", "10.0.0.50", 2222, "deployer", "~/.ssh/custom_rsa")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// 当前 Server 没有 User 字段，这一行应该导致测试失败
-	if srv.User == "" {
-		t.Error("User field should have a default value")
+	if srv.User != "deployer" {
+		t.Errorf("expected User 'deployer', got '%s'", srv.User)
+	}
+	
+	if srv.KeyPath != "~/.ssh/custom_rsa" {
+		t.Errorf("expected KeyPath '~/.ssh/custom_rsa', got '%s'", srv.KeyPath)
 	}
 }

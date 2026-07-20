@@ -56,14 +56,15 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import axios from 'axios'
+import { api } from '../api'
 import { ElMessage } from 'element-plus'
 import { useRouter } from 'vue-router'
 import { Link, CopyDocument, ArrowRight } from '@element-plus/icons-vue'
+import type { Project } from '../types'
 
 const router = useRouter()
 
-const projects = ref<any[]>([])
+const projects = ref<Project[]>([])
 const dialogVisible = ref(false)
 const creating = ref(false)
 const form = ref({
@@ -73,7 +74,7 @@ const form = ref({
 
 const fetchProjects = async () => {
   try {
-    const res = await axios.get('/api/projects')
+    const res = await api.getProjects()
     projects.value = res.data
   } catch (e) {
     ElMessage.error('获取项目失败')
@@ -88,7 +89,7 @@ const createProject = async () => {
   
   creating.value = true
   try {
-    const res = await axios.post('/api/projects', form.value)
+    const res = await api.createProject(form.value)
     ElMessage.success('创建成功')
     projects.value.push(res.data)
     dialogVisible.value = false
@@ -101,7 +102,7 @@ const createProject = async () => {
   }
 }
 
-const viewEnvs = (row: any) => {
+const viewEnvs = (row: Project) => {
   router.push(`/projects/${row.id}/environments`)
 }
 

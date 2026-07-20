@@ -7,13 +7,16 @@ import (
 
 type DeploymentModel struct {
 	gorm.Model
-	ProjectID  uint
-	EnvID      uint
-	UserID     uint
-	CommitHash string
-	Status     string
-	Phase      string
-	Log        string `gorm:"type:text"`
+	ProjectID   uint
+	EnvID       uint   `gorm:"index"`
+	UserID      uint   `gorm:"index"`
+	CommitHash  string `gorm:"index"`
+	Status      string `gorm:"index"`
+	Phase       string
+	Log         string `gorm:"type:text"`
+	ReleaseName string
+
+	Environment EnvironmentModel `gorm:"foreignKey:EnvID;constraint:OnDelete:CASCADE;"`
 }
 
 type SqliteDeploymentRepository struct {
@@ -32,6 +35,7 @@ func (r *SqliteDeploymentRepository) Save(d *domain.Deployment) error {
 		Status:     d.Status,
 		Phase:      d.Phase,
 		Log:        d.Log,
+		ReleaseName: d.ReleaseName,
 	}
 	if d.ID != 0 {
 		model.ID = d.ID
@@ -56,12 +60,14 @@ func (r *SqliteDeploymentRepository) FindByID(id uint) (*domain.Deployment, erro
 		Status:     model.Status,
 		Phase:      model.Phase,
 		Log:        model.Log,
+		ReleaseName: model.ReleaseName,
+		CreatedAt:  model.CreatedAt,
 	}, nil
 }
 
 func (r *SqliteDeploymentRepository) FindByEnvID(envID uint) ([]*domain.Deployment, error) {
 	var models []DeploymentModel
-	if err := r.db.Where("env_id = ?", envID).Order("created_at desc").Find(&models).Error; err != nil {
+	if err := r.db.Where("env_id = ?", envID).Order("id desc").Limit(20).Find(&models).Error; err != nil {
 		return nil, err
 	}
 	var res []*domain.Deployment
@@ -74,6 +80,8 @@ func (r *SqliteDeploymentRepository) FindByEnvID(envID uint) ([]*domain.Deployme
 			Status:     m.Status,
 			Phase:      m.Phase,
 			Log:        m.Log,
+			ReleaseName: m.ReleaseName,
+			CreatedAt:  m.CreatedAt,
 		})
 	}
 	return res, nil

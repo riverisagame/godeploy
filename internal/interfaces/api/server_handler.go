@@ -2,28 +2,32 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"pdeploy/internal/application"
 	"pdeploy/internal/domain"
 )
 
 type ServerHandler struct {
-	repo domain.ServerRepository
+	svc *application.ServerService
 }
 
-func NewServerHandler(repo domain.ServerRepository) *ServerHandler {
-	return &ServerHandler{repo: repo}
+func NewServerHandler(svc *application.ServerService) *ServerHandler {
+	return &ServerHandler{svc: svc}
 }
 
 type CreateServerReq struct {
-	Name string `json:"name"`
-	IP   string `json:"ip"`
-	Port int    `json:"port"`
+	Name    string `json:"name"`
+	IP      string `json:"ip"`
+	Port    int    `json:"port"`
+	User    string `json:"user"`
+	KeyPath string `json:"key_path"`
 }
 
 func (h *ServerHandler) List(w http.ResponseWriter, r *http.Request) {
-	servers, err := h.repo.FindAll()
+	servers, err := h.svc.ListServers()
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		RespondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	
@@ -32,7 +36,7 @@ func (h *ServerHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(servers)
+	RespondJSON(w, servers)
 }
 
 func (h *ServerHandler) Create(w http.ResponseWriter, r *http.Request) {
@@ -42,18 +46,35 @@ func (h *ServerHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s, err := domain.NewServer(req.Name, req.IP, req.Port)
+	s, err := h.svc.CreateServer(req.Name, req.IP, req.Port, req.User, req.KeyPath)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	if err := h.repo.Save(s); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		RespondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(s)
+	RespondJSON(w, s)
+}
+
+func (h *ServerHandler) Delete(w http.ResponseWriter, r *http.Request) {
+	idStr := r.PathValue("id")
+	if idStr == "" {
+		RespondError(w, http.StatusBadRequest, "missing server id")
+		return
+	}
+
+	var id uint
+	_, err := fmt.Sscanf(idStr, "%d", &id)
+	if err != nil {
+		RespondError(w, http.StatusBadRequest, "invalid server id")
+		return
+	}
+
+	if err := h.svc.DeleteServer(id); err != nil {
+		RespondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }

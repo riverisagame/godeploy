@@ -2,14 +2,31 @@ package domain
 
 import "errors"
 
+// @Ref: docs/sps/plans/20260720_env_vars_ir.md | @Date: 2026-07-20
+type EnvVar struct {
+	Key      string `json:"key"`
+	Value    string `json:"value"`
+	IsSecret bool   `json:"is_secret"`
+}
+
+// CommitInfo 描述 Git 提交的信息
+type CommitInfo struct {
+	Hash    string `json:"hash"`
+	Message string `json:"message"`
+	Author  string `json:"author"`
+	Date    string `json:"date"`
+}
+
 type Environment struct {
-	Name       string `json:"name"`
-	Branch     string `json:"branch"`
-	DeployType string `json:"deploy_type"`
-	PreDeploy  string `json:"pre_deploy"`
-	PostDeploy string `json:"post_deploy"`
-	ServerIDs  []uint `json:"server_ids"`
-	DeployPath string `json:"deploy_path"`
+	ID         uint     `json:"id"`
+	Name       string   `json:"name"`
+	Branch     string   `json:"branch"`
+	DeployType string   `json:"deploy_type"`
+	PreDeploy  string   `json:"pre_deploy"`
+	PostDeploy string   `json:"post_deploy"`
+	ServerIDs  []uint   `json:"server_ids"`
+	DeployPath string   `json:"deploy_path"`
+	EnvVars    []EnvVar `json:"env_vars"`
 }
 
 type Project struct {
@@ -53,7 +70,16 @@ func (p *Project) AddEnvironment(name, branch, deployType string) error {
 		DeployType: deployType,
 		ServerIDs:  make([]uint, 0),
 		DeployPath: "/var/www/pdeploy",
+		EnvVars:    make([]EnvVar, 0),
 	}
 	p.Environments = append(p.Environments, env)
 	return nil
+}
+
+func (e *Environment) AddEnvVar(key, value string, isSecret bool) {
+	e.EnvVars = append(e.EnvVars, EnvVar{
+		Key:      key,
+		Value:    value,
+		IsSecret: isSecret,
+	})
 }

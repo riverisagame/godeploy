@@ -14,4 +14,6 @@ type SSHClient interface {
 type GitClient interface {
 	// CloneOrPull 拉取或更新代码到本地 workspace，返回 workspace 路径
 	CloneOrPull(repoURL, branch, projectName string, logChan chan<- string) (workspacePath string, err error)
+	// FetchAndGetCommits 拉取最新代码并获取增量提交记录
+	FetchAndGetCommits(repoURL, branch, projectName, fromCommit string) ([]domain.CommitInfo, error)
 }

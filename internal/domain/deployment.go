@@ -1,15 +1,20 @@
 package domain
 
-import "errors"
+import (
+	"errors"
+	"time"
+)
 
 type Deployment struct {
-	ID         uint   `json:"id"`
-	EnvID      uint   `json:"env_id"`
-	UserID     uint   `json:"user_id"`
-	CommitHash string `json:"commit_hash"`
-	Status     string `json:"status"` // pending, running, success, failed
-	Phase      string `json:"phase"`
-	Log        string `json:"log"`
+	ID          uint      `json:"id"`
+	EnvID       uint      `json:"env_id"`
+	UserID      uint      `json:"user_id"`
+	CommitHash  string    `json:"commit_hash"`
+	Status      string    `json:"status"` // pending, running, success, failed
+	Phase       string    `json:"phase"`
+	Log         string    `json:"log"`
+	ReleaseName string    `json:"release_name"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 func NewDeployment(envID, userID uint, commitHash string) (*Deployment, error) {
@@ -33,9 +38,11 @@ func (d *Deployment) SetPhase(phase string) {
 	d.Phase = phase
 }
 
-func (d *Deployment) MarkSuccess(log string) {
+func (d *Deployment) MarkSuccess(log string, releaseName string) {
 	d.Status = "success"
 	d.Log = log
+	// @Ref: docs/sps/plans/20260720_ui_rollback_history_ir.md | @Date: 2026-07-20
+	d.ReleaseName = releaseName
 }
 
 func (d *Deployment) MarkFailed(log string) {
