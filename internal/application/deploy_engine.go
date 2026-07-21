@@ -198,3 +198,70 @@ func (e *DeployEngine) Rollback(deployment *domain.Deployment, env *domain.Envir
 		time.Sleep(300 * time.Millisecond)
 	}()
 }
+
+func (e *DeployEngine) runDeploySteps(ctx context.Context, deployment *domain.Deployment, project *domain.Project, env *domain.Environment) {
+	lockKey := fmt.Sprintf("%d-%d", project.ID, env.ID)
+	lock := e.getDeployLock(lockKey)
+	lock.Lock()
+	defer lock.Unlock()
+
+	e.broadcastLog(deployment.ID, fmt.Sprintf(">>> 开始部署任务 #%d (环境: %s)...\n", deployment.ID, env.Name))
+
+	logChan := make(chan string, 100)
+	go func() {
+		for msg := range logChan {
+			e.broadcastLog(deployment.ID, msg)
+		}
+	}()
+
+	// 1. Clone Repo
+	workspacePath, err := e.gitClient.CloneForDeploy(project.RepoURL, env.Branch, project.Name, deployment.ID, logChan)
+	if err != nil {
+		e.broadcastLog(deployment.ID, fmt.Sprintf("ERROR: Git clone failed: %v\n", err))
+		e.deploySvc.CompleteDeploy(deployment.ID, false, e.GetLogHistory(deployment.ID), "")
+		return
+	}
+	defer e.gitClient.CleanupDeploy(project.Name, deployment.ID, workspacePath)
+
+	if ctx.Err() != nil {
+		e.broadcastLog(deployment.ID, "ERROR: Deploy cancelled before sync.\n")
+		e.deploySvc.CompleteDeploy(deployment.ID, false, e.GetLogHistory(deployment.ID), "")
+		return
+	}
+
+	releaseName := fmt.Sprintf("release_%d", time.Now().UnixNano())
+
+	// 2. Sync to Servers
+	for _, srvID := range env.ServerIDs {
+		srv, err := e.serverSvc.GetServerByID(srvID)
+		if err != nil || srv == nil {
+			e.broadcastLog(deployment.ID, fmt.Sprintf("ERROR: Server %d not found.\n", srvID))
+			continue
+		}
+
+		e.broadcastLog(deployment.ID, fmt.Sprintf(">>> 同步代码到服务器 %s...\n", srv.Name))
+		
+		remoteReleasePath := fmt.Sprintf("%s/releases/%s", env.DeployPath, releaseName)
+		
+		if e.sshClient != nil {
+			err = e.sshClient.SyncFiles(srv, workspacePath, remoteReleasePath, "", logChan)
+			if err != nil {
+				e.broadcastLog(deployment.ID, fmt.Sprintf("ERROR: Sync failed: %v\n", err))
+				continue
+			}
+
+			// Handle symlink
+			if env.DeployType == "symlink" {
+				currentLink := fmt.Sprintf("%s/current", env.DeployPath)
+				tmpLink := fmt.Sprintf("%s/current_tmp_%d", env.DeployPath, time.Now().UnixNano())
+				symlinkCmd := fmt.Sprintf("ln -sfn %s %s && mv -Tf %s %s", remoteReleasePath, tmpLink, tmpLink, currentLink)
+				e.sshClient.RunCommand(srv, symlinkCmd, logChan)
+			}
+		} else {
+			e.broadcastLog(deployment.ID, "Test mode: skipping ssh sync.\n")
+		}
+	}
+
+	e.deploySvc.CompleteDeploy(deployment.ID, true, e.GetLogHistory(deployment.ID), releaseName)
+	e.broadcastLog(deployment.ID, ">>> 部署成功完成。\n")
+}
