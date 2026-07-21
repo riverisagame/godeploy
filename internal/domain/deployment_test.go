@@ -13,7 +13,7 @@ func TestNewDeployment(t *testing.T) {
 		t.Fatalf("Expected no error for user ID 0 (webhook), got %v", err)
 	}
 	
-	d, err = NewDeployment(1, 1, "hash123")
+	d, err := NewDeployment(1, 1, "hash123")
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
 	}
