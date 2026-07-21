@@ -11,6 +11,7 @@ import (
 	"runtime"
 
 	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/knownhosts"
 )
 
 // Client 实现 application.SSHClient 接口
@@ -50,10 +51,23 @@ func (c *Client) buildConfig(server *domain.Server) (*ssh.ClientConfig, error) {
 		}
 	}
 
+	var hostKeyCallback ssh.HostKeyCallback
+	// @Ref: docs/sps/plans/20260721_production_fix_ir.md Task 1.2 | @Date: 2026-07-21
+	home, err := os.UserHomeDir()
+	if err == nil {
+		knownHostsPath := filepath.Join(home, ".ssh", "known_hosts")
+		if cb, err := knownhosts.New(knownHostsPath); err == nil {
+			hostKeyCallback = cb
+		}
+	}
+	if hostKeyCallback == nil {
+		hostKeyCallback = ssh.InsecureIgnoreHostKey()
+	}
+
 	config := &ssh.ClientConfig{
 		User:            user,
 		Auth:            authMethods,
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // TODO: 生产环境应校验 HostKey
+		HostKeyCallback: hostKeyCallback,
 	}
 	return config, nil
 }
@@ -104,7 +118,7 @@ func (c *Client) RunCommand(server *domain.Server, cmd string, logChan chan<- st
 }
 
 // SyncFiles 使用 rsync 将本地目录同步到远程服务器
-func (c *Client) SyncFiles(server *domain.Server, localPath, remotePath string, logChan chan<- string) error {
+func (c *Client) SyncFiles(server *domain.Server, localPath, remotePath, linkDest string, logChan chan<- string) error {
 	if runtime.GOOS == "windows" {
 		// Windows 下无 rsync，使用 scp 回退方案
 		logChan <- "[Sync] Windows detected, using scp fallback...\n"
@@ -119,15 +133,25 @@ func (c *Client) SyncFiles(server *domain.Server, localPath, remotePath string, 
 	// 构建 rsync 命令
 	sshCmd := fmt.Sprintf("ssh -p %d -o StrictHostKeyChecking=no", server.Port)
 	if server.KeyPath != "" {
-		sshCmd += fmt.Sprintf(" -i %s", server.KeyPath)
+		sshCmd += fmt.Sprintf(" -i '%s'", server.KeyPath)
 	}
 
+	// @Ref: docs/sps/plans/20260721_production_fix_ir.md Task 1.3 | @Date: 2026-07-21
 	rsyncArgs := []string{
-		"-avz", "--delete",
+		"-avz", "--delete", "--protect-args",
+		"--exclude", ".git",
 		"-e", sshCmd,
-		localPath + "/",
-		fmt.Sprintf("%s@%s:%s/", user, server.IP, remotePath),
 	}
+
+	// 优化点：支持增量硬链接部署
+	if linkDest != "" {
+		rsyncArgs = append(rsyncArgs, fmt.Sprintf("--link-dest=%s", linkDest))
+	}
+
+	rsyncArgs = append(rsyncArgs, 
+		localPath+"/", 
+		fmt.Sprintf("%s@%s:%s/", user, server.IP, remotePath),
+	)
 
 	logChan <- fmt.Sprintf("[Sync] rsync %s -> %s@%s:%s\n", localPath, user, server.IP, remotePath)
 
@@ -165,7 +189,7 @@ func (c *Client) scpFallback(server *domain.Server, localPath, remotePath string
 	if server.KeyPath != "" {
 		scpArgs = append(scpArgs, "-i", server.KeyPath)
 	}
-	scpArgs = append(scpArgs, localPath, fmt.Sprintf("%s@%s:%s", user, server.IP, remotePath))
+	scpArgs = append(scpArgs, localPath, fmt.Sprintf("%s@%s:'%s'", user, server.IP, remotePath))
 
 	logChan <- fmt.Sprintf("[Sync] scp %s -> %s@%s:%s\n", localPath, user, server.IP, remotePath)
 

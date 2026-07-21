@@ -57,6 +57,12 @@ func (p *Project) AddEnvironment(name, branch, deployType string) error {
 	if name == "" {
 		return errors.New("environment name cannot be empty")
 	}
+	// @Ref: docs/sps/plans/20260721_production_fix_ir.md Task 4.6 | @Date: 2026-07-21
+	for _, e := range p.Environments {
+		if e.Name == name {
+			return errors.New("environment with this name already exists")
+		}
+	}
 	if branch == "" {
 		branch = "main"
 	}

@@ -41,6 +41,7 @@ func (m *mockProjectRepo) FindAll() ([]*domain.Project, error) {
 		},
 	}, nil
 }
+func (m *mockProjectRepo) Delete(id uint) error { return nil }
 
 func TestDeployHandler_StartDeploy_UsesEnvID(t *testing.T) {
 	deployRepo := &mockDeployRepo{}

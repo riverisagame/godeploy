@@ -7,12 +7,17 @@ import (
 	"time"
 )
 
-type mockSSHClient struct{}
+type mockSSHClient struct {
+	cmds   []string
+	synced bool
+}
 
 func (m *mockSSHClient) RunCommand(srv *domain.Server, cmd string, logChan chan<- string) error {
+	m.cmds = append(m.cmds, cmd)
 	return nil
 }
-func (m *mockSSHClient) SyncFiles(srv *domain.Server, srcDir string, destDir string, logChan chan<- string) error {
+func (m *mockSSHClient) SyncFiles(server *domain.Server, localPath, remotePath, linkDest string, logChan chan<- string) error {
+	m.synced = true
 	return nil
 }
 

@@ -25,6 +25,10 @@ func (m *mockProjectRepo) Save(p *domain.Project) error {
 }
 func (m *mockProjectRepo) FindByID(id uint) (*domain.Project, error) { return m.projects[id], nil }
 func (m *mockProjectRepo) FindAll() ([]*domain.Project, error)       { return nil, nil }
+func (m *mockProjectRepo) Delete(id uint) error {
+	delete(m.projects, id)
+	return nil
+}
 
 func TestProjectHandler_Create(t *testing.T) {
 	repo := &mockProjectRepo{projects: make(map[uint]*domain.Project)}

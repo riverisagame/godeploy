@@ -1,8 +1,14 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
 	"pdeploy"
 	"pdeploy/internal/application"
 	"pdeploy/internal/config"
@@ -17,11 +23,20 @@ import (
 
 func main() {
 	cfg := config.Load()
+	if err := cfg.Validate(); err != nil {
+		log.Fatalf("Configuration error: %v", err)
+	}
 
 	// 1. Initialize Infrastructure
-	db, err := gorm.Open(sqlite.Open(cfg.DBPath), &gorm.Config{})
+	// @Ref: docs/sps/plans/20260721_production_fix_ir.md Task 2.3 | @Date: 2026-07-21
+	dsn := cfg.DBPath + "?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)"
+	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
 	if err != nil {
 		log.Fatal("Failed to open DB:", err)
+	}
+
+	if sqlDB, err := db.DB(); err == nil {
+		sqlDB.SetMaxOpenConns(1) // Avoid database is locked errors
 	}
 
 	err = db.AutoMigrate(
@@ -46,18 +61,39 @@ func main() {
 
 	userRepo := persistence.NewSqliteUserRepository(db)
 	authSvc := application.NewAuthService(userRepo, cfg.JWTSecret)
-	serverSvc := application.NewServerService(serverRepo)
+	serverSvc := application.NewServerService(serverRepo, projectRepo)
 
 	deploySvc := application.NewDeployService(deployRepo, projectRepo, gitClient)
 	deployEngine := application.NewDeployEngine(sshClient, gitClient, serverSvc, deploySvc)
 
 	// 3. Initialize Interfaces
-	router := api.NewRouter(projectSvc, serverSvc, deploySvc, deployEngine, authSvc, pdeploy.StaticFS)
+	router := api.NewRouter(projectSvc, serverSvc, deploySvc, deployEngine, authSvc, pdeploy.StaticFS, cfg.JWTSecret)
 
 	addr := ":" + cfg.Port
-	log.Printf("pdeploy server starting on %s...\n", addr)
-	err = http.ListenAndServe(addr, router)
-	if err != nil {
-		log.Fatal("Server failed:", err)
+	srv := &http.Server{
+		Addr:    addr,
+		Handler: router,
 	}
+
+	go func() {
+		log.Printf("pdeploy server starting on %s...\n", addr)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Server failed: %v", err)
+		}
+	}()
+
+	// Wait for interrupt signal to gracefully shutdown the server with
+	// a timeout of 10 seconds.
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+	log.Println("Shutting down server...")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Fatal("Server forced to shutdown:", err)
+	}
+
+	log.Println("Server exiting")
 }

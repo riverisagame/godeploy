@@ -83,11 +83,16 @@ func (e *DeployEngine) Publish(deployID uint, msg string) {
 
 func (e *DeployEngine) CloseSubscribers(deployID uint) {
 	e.subMu.Lock()
-	defer e.subMu.Unlock()
 	for _, ch := range e.subscribers[deployID] {
 		close(ch)
 	}
 	delete(e.subscribers, deployID)
+	e.subMu.Unlock()
+
+	// @Ref: docs/sps/plans/20260721_production_fix_ir.md Task 2.2 | @Date: 2026-07-21
+	e.historyMu.Lock()
+	delete(e.logHistory, deployID)
+	e.historyMu.Unlock()
 }
 
 func (e *DeployEngine) GetLogHistory(deployID uint) string {
@@ -177,7 +182,8 @@ func (e *DeployEngine) StartDeploy(deployment *domain.Deployment, project *domai
 				continue
 			}
 
-			err = e.sshClient.SyncFiles(srv, workspacePath, releaseDir, syncLogChan)
+			currentLink := fmt.Sprintf("%s/current", env.DeployPath)
+			err = e.sshClient.SyncFiles(srv, workspacePath, releaseDir, currentLink, syncLogChan)
 			close(syncLogChan)
 			if err != nil {
 				e.broadcastLog(deployment.ID, fmt.Sprintf("ERROR: 文件同步失败: %v\n", err))
@@ -215,7 +221,6 @@ func (e *DeployEngine) StartDeploy(deployment *domain.Deployment, project *domai
 
 			e.broadcastLog(deployment.ID, ">>> [4/5] 切换 Symlink...\n")
 			deployment.SetPhase("symlink")
-			currentLink := fmt.Sprintf("%s/current", env.DeployPath)
 			tmpLink := fmt.Sprintf("%s/current_tmp_%d", env.DeployPath, time.Now().UnixNano())
 			symlinkCmd := fmt.Sprintf("ln -sfn %s %s && mv -Tf %s %s", releaseDir, tmpLink, tmpLink, currentLink)
 			symlinkLogChan := make(chan string, 50)

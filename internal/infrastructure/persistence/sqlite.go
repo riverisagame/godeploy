@@ -104,7 +104,7 @@ func toProjectModel(p *domain.Project) *ProjectModel {
 
 func (r *SqliteProjectRepository) Save(p *domain.Project) error {
 	pm := toProjectModel(p)
-	err := r.db.Save(pm).Error
+	err := r.db.Session(&gorm.Session{FullSaveAssociations: true}).Save(pm).Error
 	if err == nil {
 		p.ID = pm.ID // populate ID back to domain entity
 	}
@@ -124,15 +124,20 @@ func (r *SqliteProjectRepository) FindByID(id uint) (*domain.Project, error) {
 }
 
 func (r *SqliteProjectRepository) FindAll() ([]*domain.Project, error) {
-	var pms []ProjectModel
-	err := r.db.Preload("Environments").Find(&pms).Error
-	if err != nil {
+	var pModels []ProjectModel
+	if err := r.db.Preload("Environments").Find(&pModels).Error; err != nil {
 		return nil, err
 	}
 
 	var projects []*domain.Project
-	for i := range pms {
-		projects = append(projects, toDomainProject(&pms[i]))
+	for _, pm := range pModels {
+		projects = append(projects, toDomainProject(&pm))
 	}
 	return projects, nil
+}
+
+// @Ref: docs/sps/plans/20260721_project_server_edit_ir.md | @Date: 2026-07-21
+func (r *SqliteProjectRepository) Delete(id uint) error {
+	// GORM's OnDelete:CASCADE on ProjectModel.Environments will handle associated records
+	return r.db.Delete(&ProjectModel{}, id).Error
 }

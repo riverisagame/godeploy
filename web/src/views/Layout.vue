@@ -2,7 +2,7 @@
   <el-container class="layout-container">
     <el-aside width="240px" class="aside">
       <div class="logo">PDeploy</div>
-      <el-menu default-active="/projects" router background-color="transparent" text-color="#94A3B8" active-text-color="#F8FAFC">
+      <el-menu :default-active="activeMenu" router background-color="transparent" text-color="#94A3B8" active-text-color="#F8FAFC">
         <el-menu-item index="/projects" class="cursor-pointer">
           <el-icon><Menu /></el-icon>
           <span>项目管理</span>
@@ -10,10 +10,6 @@
         <el-menu-item index="/servers" class="cursor-pointer">
           <el-icon><Platform /></el-icon>
           <span>服务器管理</span>
-        </el-menu-item>
-        <el-menu-item index="/deployments" class="cursor-pointer">
-          <el-icon><Promotion /></el-icon>
-          <span>上线发布</span>
         </el-menu-item>
       </el-menu>
     </el-aside>
@@ -27,7 +23,7 @@
             </span>
             <template #dropdown>
               <el-dropdown-menu>
-                <el-dropdown-item>退出</el-dropdown-item>
+                <el-dropdown-item @click="handleLogout">退出</el-dropdown-item>
               </el-dropdown-menu>
             </template>
           </el-dropdown>
@@ -42,7 +38,25 @@
 </template>
 
 <script setup lang="ts">
-import { Menu, Promotion, Platform, ArrowDown } from '@element-plus/icons-vue'
+import { computed } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { Menu, Platform, ArrowDown } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
+
+const route = useRoute()
+const router = useRouter()
+
+const activeMenu = computed(() => {
+  const path = route.path
+  if (path.startsWith('/projects')) return '/projects'
+  return path
+})
+
+const handleLogout = () => {
+  localStorage.removeItem('token')
+  ElMessage.success('已退出登录')
+  router.push('/')
+}
 </script>
 
 <style scoped>

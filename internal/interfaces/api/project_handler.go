@@ -120,3 +120,45 @@ func (h *ProjectHandler) UpdateEnvironment(w http.ResponseWriter, r *http.Reques
 	w.Header().Set("Content-Type", "application/json")
 	RespondJSON(w, p)
 }
+
+// @Ref: docs/sps/plans/20260721_project_server_edit_ir.md | @Date: 2026-07-21
+func (h *ProjectHandler) Update(w http.ResponseWriter, r *http.Request) {
+	idStr := r.PathValue("id")
+	if idStr == "" {
+		http.Error(w, "missing project id", http.StatusBadRequest)
+		return
+	}
+	id, _ := strconv.Atoi(idStr)
+
+	var req CreateProjectReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	p, err := h.svc.UpdateProject(uint(id), req.Name, req.RepoURL)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	RespondJSON(w, p)
+}
+
+// @Ref: docs/sps/plans/20260721_project_server_edit_ir.md | @Date: 2026-07-21
+func (h *ProjectHandler) Delete(w http.ResponseWriter, r *http.Request) {
+	idStr := r.PathValue("id")
+	if idStr == "" {
+		http.Error(w, "missing project id", http.StatusBadRequest)
+		return
+	}
+	id, _ := strconv.Atoi(idStr)
+
+	if err := h.svc.DeleteProject(uint(id)); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}

@@ -2,9 +2,14 @@ import request from './request'
 import type { Project, Environment, Deployment, Server } from '../types'
 
 export const api = {
+  // Auth
+  login: (data: any) => request.post('/login', data),
+
   // Projects
   getProjects: () => request.get<Project[]>('/projects'),
   createProject: (data: Partial<Project>) => request.post<Project>('/projects', data),
+  updateProject: (id: number | string, data: Partial<Project>) => request.put<Project>(`/projects/${id}`, data),
+  deleteProject: (id: number | string) => request.delete(`/projects/${id}`),
   
   // Environments
   getProjectEnvironments: (projectId: string | number) => request.get<Environment[]>(`/projects/${projectId}/environments`),
@@ -20,5 +25,6 @@ export const api = {
   // Servers
   getServers: () => request.get<Server[]>('/servers'),
   createServer: (data: Partial<Server>) => request.post<Server>('/servers', data),
-  deleteServer: (id: number) => request.delete(`/servers/${id}`),
+  updateServer: (id: number | string, data: Partial<Server>) => request.put<Server>(`/servers/${id}`, data),
+  deleteServer: (id: number | string) => request.delete(`/servers/${id}`),
 }

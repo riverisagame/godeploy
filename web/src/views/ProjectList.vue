@@ -25,8 +25,16 @@
               <span>保留版本数: <strong>{{ prj.keep_releases }}</strong></span>
             </div>
           </div>
-          <div class="card-footer">
-            <el-button type="primary" text bg size="small">配置环境 <el-icon class="el-icon--right"><ArrowRight /></el-icon></el-button>
+          <div class="card-footer" style="justify-content: space-between;">
+            <div>
+              <el-button type="primary" link @click.stop="openEdit(prj)">编辑</el-button>
+              <el-popconfirm title="确定删除此项目及其所有环境配置吗？" @confirm="handleDelete(prj.id)" placement="top">
+                <template #reference>
+                  <el-button type="danger" link @click.stop>删除</el-button>
+                </template>
+              </el-popconfirm>
+            </div>
+            <el-button type="primary" text bg size="small" @click.stop="viewEnvs(prj)">配置环境 <el-icon class="el-icon--right"><ArrowRight /></el-icon></el-button>
           </div>
         </el-card>
       </el-col>
@@ -34,8 +42,8 @@
     
     <el-empty v-else description="暂无项目，请点击右上角新建" :image-size="200"></el-empty>
 
-    <!-- Create Project Dialog -->
-    <el-dialog title="新建项目" v-model="dialogVisible" width="480px" destroy-on-close class="custom-dialog">
+    <!-- Create / Edit Project Dialog -->
+    <el-dialog :title="isEdit ? '编辑项目' : '新建项目'" v-model="dialogVisible" width="480px" destroy-on-close class="custom-dialog" @closed="resetForm">
       <el-form :model="form" label-position="top" class="custom-form">
         <el-form-item label="项目名称">
           <el-input v-model="form.name" placeholder="例如: pdeploy-web" size="large"></el-input>
@@ -47,7 +55,7 @@
       <template #footer>
         <div class="dialog-footer">
           <el-button @click="dialogVisible = false">取消</el-button>
-          <el-button type="primary" @click="createProject" :loading="creating">确定</el-button>
+          <el-button type="primary" @click="handleSubmit" :loading="saving">确定</el-button>
         </div>
       </template>
     </el-dialog>
@@ -66,7 +74,9 @@ const router = useRouter()
 
 const projects = ref<Project[]>([])
 const dialogVisible = ref(false)
-const creating = ref(false)
+const isEdit = ref(false)
+const editId = ref<number | null>(null)
+const saving = ref(false)
 const form = ref({
   name: '',
   repo_url: ''
@@ -81,24 +91,50 @@ const fetchProjects = async () => {
   }
 }
 
-const createProject = async () => {
+const resetForm = () => {
+  isEdit.value = false
+  editId.value = null
+  form.value = { name: '', repo_url: '' }
+}
+
+const openEdit = (prj: Project) => {
+  isEdit.value = true
+  editId.value = prj.id
+  form.value = { name: prj.name, repo_url: prj.repo_url }
+  dialogVisible.value = true
+}
+
+const handleDelete = async (id: number) => {
+  try {
+    await api.deleteProject(id)
+    ElMessage.success('删除成功')
+    fetchProjects()
+  } catch (e: any) {
+    ElMessage.error(e.response?.data || '删除失败')
+  }
+}
+
+const handleSubmit = async () => {
   if (!form.value.name || !form.value.repo_url) {
     ElMessage.warning('请填写项目名称和Git仓库地址')
     return
   }
   
-  creating.value = true
+  saving.value = true
   try {
-    const res = await api.createProject(form.value)
-    ElMessage.success('创建成功')
-    projects.value.push(res.data)
+    if (isEdit.value && editId.value) {
+      await api.updateProject(editId.value, form.value)
+      ElMessage.success('更新成功')
+    } else {
+      await api.createProject(form.value)
+      ElMessage.success('创建成功')
+    }
+    fetchProjects()
     dialogVisible.value = false
-    form.value.name = ''
-    form.value.repo_url = ''
   } catch (e: any) {
-    ElMessage.error(e.response?.data || '创建失败')
+    ElMessage.error(e.response?.data || (isEdit.value ? '更新失败' : '创建失败'))
   } finally {
-    creating.value = false
+    saving.value = false
   }
 }
 

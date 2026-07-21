@@ -4,6 +4,7 @@ type ProjectRepository interface {
 	Save(p *Project) error
 	FindByID(id uint) (*Project, error)
 	FindAll() ([]*Project, error)
+	Delete(id uint) error
 }
 
 type EnvironmentRepository interface {

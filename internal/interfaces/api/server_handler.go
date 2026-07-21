@@ -78,3 +78,32 @@ func (h *ServerHandler) Delete(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusNoContent)
 }
+
+// @Ref: docs/sps/plans/20260721_project_server_edit_ir.md | @Date: 2026-07-21
+func (h *ServerHandler) Update(w http.ResponseWriter, r *http.Request) {
+	idStr := r.PathValue("id")
+	if idStr == "" {
+		http.Error(w, "missing server id", http.StatusBadRequest)
+		return
+	}
+	var id uint
+	if _, err := fmt.Sscanf(idStr, "%d", &id); err != nil {
+		http.Error(w, "invalid server id", http.StatusBadRequest)
+		return
+	}
+
+	var req CreateServerReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	s, err := h.svc.UpdateServer(id, req.Name, req.IP, req.Port, req.User, req.KeyPath)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	RespondJSON(w, s)
+}

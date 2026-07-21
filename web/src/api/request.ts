@@ -14,7 +14,10 @@ const apiClient: AxiosInstance = axios.create({
 // Request Interceptor
 apiClient.interceptors.request.use(
   (config) => {
-    // Inject token if needed here in the future
+    const token = localStorage.getItem('token')
+    if (token) {
+      config.headers['Authorization'] = `Bearer ${token}`
+    }
     return config
   },
   (error) => {
@@ -28,6 +31,13 @@ apiClient.interceptors.response.use(
     return response
   },
   (error: AxiosError) => {
+    if (error.response?.status === 401) {
+      localStorage.removeItem('token')
+      window.location.href = '#/login'
+      ElMessage.warning('会话已过期，请重新登录')
+      return Promise.reject(error)
+    }
+
     let errorMessage = '请求失败'
     if (error.response) {
       if (typeof error.response.data === 'string') {

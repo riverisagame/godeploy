@@ -21,15 +21,43 @@ func NewAuthMiddleware(secret string) *AuthMiddleware {
 	return &AuthMiddleware{secret: []byte(secret)}
 }
 
+func CORS(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// @Ref: docs/sps/plans/20260721_phase4_ir.md Task 4.4 | @Date: 2026-07-21
+		origin := r.Header.Get("Origin")
+		if origin != "" {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+		} else {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+		}
+		w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE")
+		w.Header().Set("Access-Control-Allow-Headers", "Accept, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization")
+		w.Header().Set("Access-Control-Allow-Credentials", "true")
+
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 func (m *AuthMiddleware) Wrap(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var tokenStr string
 		authHeader := r.Header.Get("Authorization")
-		if authHeader == "" || !strings.HasPrefix(authHeader, "Bearer ") {
+		if authHeader != "" && strings.HasPrefix(authHeader, "Bearer ") {
+			tokenStr = strings.TrimPrefix(authHeader, "Bearer ")
+		} else {
+			// Fallback to query parameter for SSE
+			tokenStr = r.URL.Query().Get("token")
+		}
+
+		if tokenStr == "" {
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
 
-		tokenStr := strings.TrimPrefix(authHeader, "Bearer ")
 		token, err := jwt.Parse(tokenStr, func(token *jwt.Token) (interface{}, error) {
 			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 				return nil, http.ErrAbortHandler
@@ -53,6 +81,36 @@ func (m *AuthMiddleware) Wrap(next http.Handler) http.Handler {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 	})
 }
+
+// LoggingMiddleware records request method, path and latency
+type LoggingMiddleware struct{}
+
+func NewLoggingMiddleware() *LoggingMiddleware {
+	return &LoggingMiddleware{}
+}
+
+func (m *LoggingMiddleware) Wrap(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// We use a custom ResponseWriter to capture the status code
+		rw := &responseWriter{w, http.StatusOK}
+		
+		// Wait, instead of implementing full responseWriter, we can just do basic log
+		log.Printf("[REQ] %s %s", r.Method, r.URL.Path)
+		next.ServeHTTP(rw, r)
+		log.Printf("[RES] %d %s %s", rw.statusCode, r.Method, r.URL.Path)
+	})
+}
+
+type responseWriter struct {
+	http.ResponseWriter
+	statusCode int
+}
+
+func (rw *responseWriter) WriteHeader(code int) {
+	rw.statusCode = code
+	rw.ResponseWriter.WriteHeader(code)
+}
+
 
 // RecoveryMiddleware 捕获所有的 panic 并返回 500 标准 JSON 错误
 type RecoveryMiddleware struct{}

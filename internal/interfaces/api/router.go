@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"net/http"
 	"pdeploy/internal/application"
+	"strings"
 )
 
 func NewRouter(
@@ -14,6 +15,7 @@ func NewRouter(
 	deployEngine *application.DeployEngine, 
 	authSvc *application.AuthService,
 	staticFS embed.FS,
+	jwtSecret string,
 ) http.Handler {
 	mux := http.NewServeMux()
 
@@ -21,7 +23,7 @@ func NewRouter(
 	serverHandler := NewServerHandler(serverSvc)
 	deployHandler := NewDeployHandler(deploySvc, deployEngine, projectSvc)
 	authHandler := NewAuthHandler(authSvc)
-	authMiddleware := NewAuthMiddleware("secret-key")
+	authMiddleware := NewAuthMiddleware(jwtSecret)
 
 	// Public Routes
 	mux.HandleFunc("POST /api/login", authHandler.Login)
@@ -34,6 +36,8 @@ func NewRouter(
 	// Project Routes
 	mux.HandleFunc("GET /api/projects", protect(projectHandler.List))
 	mux.HandleFunc("POST /api/projects", protect(projectHandler.Create))
+	mux.HandleFunc("PUT /api/projects/{id}", protect(projectHandler.Update))
+	mux.HandleFunc("DELETE /api/projects/{id}", protect(projectHandler.Delete))
 
 	// Environment Routes
 	mux.HandleFunc("POST /api/projects/{id}/environments", protect(projectHandler.AddEnvironment))
@@ -43,6 +47,7 @@ func NewRouter(
 	// Server Routes
 	mux.HandleFunc("GET /api/servers", protect(serverHandler.List))
 	mux.HandleFunc("POST /api/servers", protect(serverHandler.Create))
+	mux.HandleFunc("PUT /api/servers/{id}", protect(serverHandler.Update))
 	mux.HandleFunc("DELETE /api/servers/{id}", protect(serverHandler.Delete))
 
 	// Deploy & Log Stream Route
@@ -60,10 +65,35 @@ func NewRouter(
 	fileServer := http.FileServer(http.FS(distFS))
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		// Only serve from root if the request is not an API call
-		fileServer.ServeHTTP(w, r)
+		if r.Method == "GET" && !strings.HasPrefix(r.URL.Path, "/api/") {
+			// Check if file exists in embedded FS
+			path := strings.TrimPrefix(r.URL.Path, "/")
+			if path == "" {
+				path = "index.html"
+			}
+			_, err := distFS.Open(path)
+			if err != nil {
+				// Fallback to index.html for SPA routing
+				r.URL.Path = "/"
+			}
+			fileServer.ServeHTTP(w, r)
+		} else {
+			// If not GET or not static, maybe a 404 for API
+			http.NotFound(w, r)
+		}
+	})
+
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("ok"))
 	})
 
 	recoveryMiddleware := NewRecoveryMiddleware()
-	return recoveryMiddleware.Wrap(mux)
+	loggingMiddleware := NewLoggingMiddleware()
+	
+	var handler http.Handler = mux
+	handler = CORS(handler)
+	handler = loggingMiddleware.Wrap(handler)
+	handler = recoveryMiddleware.Wrap(handler)
+	return handler
 }

@@ -10,40 +10,41 @@
 
     <el-card class="dense-table-card" shadow="never">
       <el-table :data="servers" style="width: 100%" class="custom-table" :empty-text="'暂无服务器数据'">
-        <el-table-column prop="ID" label="ID" width="80" align="center" />
+        <el-table-column prop="id" label="ID" width="80" align="center" />
         <el-table-column label="服务器名称">
           <template #default="scope">
             <div class="server-name-cell">
               <el-icon class="server-icon"><Monitor /></el-icon>
-              <span>{{ scope.row.Name }}</span>
+              <span>{{ scope.row.name }}</span>
             </div>
           </template>
         </el-table-column>
         <el-table-column label="连接信息">
           <template #default="scope">
             <div class="connection-info">
-              <el-tag size="small" type="primary" effect="dark" class="mono-tag">{{ scope.row.User }}@{{ scope.row.IP }}</el-tag>
-              <el-tag size="small" type="info" class="mono-tag">Port: {{ scope.row.Port }}</el-tag>
+              <el-tag size="small" type="primary" effect="dark" class="mono-tag">{{ scope.row.user }}@{{ scope.row.ip }}</el-tag>
+              <el-tag size="small" type="info" class="mono-tag">Port: {{ scope.row.port }}</el-tag>
             </div>
           </template>
         </el-table-column>
         <el-table-column label="认证方式" width="120">
           <template #default="scope">
-            <el-tag size="small" :type="scope.row.KeyPath ? 'success' : 'warning'" effect="plain">
-              {{ scope.row.KeyPath ? 'Key Auth' : 'Password' }}
+            <el-tag size="small" :type="scope.row.key_path ? 'success' : 'warning'" effect="plain">
+              {{ scope.row.key_path ? 'Key Auth' : 'Password' }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="120" align="center">
+        <el-table-column label="操作" width="160" align="center">
           <template #default="scope">
+            <el-button size="small" type="primary" text bg @click="openEdit(scope.row)">编辑</el-button>
             <el-button size="small" type="danger" text bg @click="handleDelete(scope.row)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
     </el-card>
 
-    <!-- Create Server Dialog -->
-    <el-dialog title="新建服务器" v-model="dialogVisible" width="480px" destroy-on-close class="custom-dialog">
+    <!-- Create / Edit Server Dialog -->
+    <el-dialog :title="isEdit ? '编辑服务器' : '新建服务器'" v-model="dialogVisible" width="480px" destroy-on-close class="custom-dialog" @closed="resetForm">
       <el-form :model="form" label-position="top" class="custom-form">
         <el-form-item label="服务器名称">
           <el-input v-model="form.name" placeholder="例如: web-prod-01" size="large"></el-input>
@@ -76,7 +77,7 @@
       <template #footer>
         <div class="dialog-footer">
           <el-button @click="dialogVisible = false">取消</el-button>
-          <el-button type="primary" @click="createServer" :loading="creating">确定</el-button>
+          <el-button type="primary" @click="handleSubmit" :loading="saving">确定</el-button>
         </div>
       </template>
     </el-dialog>
@@ -92,7 +93,9 @@ import type { Server } from '../types'
 
 const servers = ref<Server[]>([])
 const dialogVisible = ref(false)
-const creating = ref(false)
+const isEdit = ref(false)
+const editId = ref<number | null>(null)
+const saving = ref(false)
 
 const form = ref({
   name: '',
@@ -111,27 +114,52 @@ const fetchServers = async () => {
   }
 }
 
-const createServer = async () => {
+const resetForm = () => {
+  isEdit.value = false
+  editId.value = null
+  form.value = {
+    name: '',
+    ip: '',
+    port: 22,
+    user: 'root',
+    key_path: '~/.ssh/id_rsa'
+  }
+}
+
+const openEdit = (server: Server) => {
+  isEdit.value = true
+  editId.value = server.id
+  form.value = {
+    name: server.name,
+    ip: server.ip,
+    port: server.port,
+    user: server.user,
+    key_path: server.key_path
+  }
+  dialogVisible.value = true
+}
+
+const handleSubmit = async () => {
   if (!form.value.name || !form.value.ip) {
     ElMessage.warning('请填写名称和IP')
     return
   }
   
-  creating.value = true
+  saving.value = true
   try {
-    const res = await api.createServer(form.value)
-    ElMessage.success('创建成功')
-    servers.value.push(res.data)
+    if (isEdit.value && editId.value) {
+      await api.updateServer(editId.value, form.value)
+      ElMessage.success('更新成功')
+    } else {
+      await api.createServer(form.value)
+      ElMessage.success('创建成功')
+    }
+    fetchServers()
     dialogVisible.value = false
-    form.value.name = ''
-    form.value.ip = ''
-    form.value.port = 22
-    form.value.user = 'root'
-    form.value.key_path = '~/.ssh/id_rsa'
   } catch (e: any) {
-    ElMessage.error(e.response?.data || '创建失败')
+    ElMessage.error(e.response?.data || (isEdit.value ? '更新失败' : '创建失败'))
   } finally {
-    creating.value = false
+    saving.value = false
   }
 }
 

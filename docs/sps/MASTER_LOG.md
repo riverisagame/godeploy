@@ -156,9 +156,9 @@
 | 2026-07-19 | TASK-20260719 | SIMPLIFY | docs/sps/decisions/20260719_simplification_scope.md | PENDING |
 | 2026-07-19 | TASK-20260719 | SIMPLIFY_IR | docs/sps/plans/20260719_simplification_ir_plan.md | PLAN_LOCKED |
 | 2026-07-19 | PURGE_CODE | - | docs/sps/decisions/20260719_purge_codebase_scan.md | EVALUATING |
-|   2 0 2 6 - 0 7 - 1 9   |   U I _ S S E _ D E P L O Y   |   d e p l o y _ e n g i n e   |   d o c s / s p s / l o g s / 2 0 2 6 0 7 1 9 _ d e p l o y _ e n g i n e _ a c c e p t a n c e . m d   |   B U I L D _ S U C C E S S   |  
+| 2026-07-20 | PHASE-5 | UX/Eng | docs/sps/plans/20260721_phase5_plan.md | PLAN_LOCKED |
 | 2026-07-19 | INITIALIZE | Core | docs/sps/plans/20260719_p0_deploy_gaps_plan.md | DONE |
 | 2026-07-20 | ROLLBACK_UI | Frontend | docs/sps/plans/20260720_ui_rollback_history_ir.md | DONE |
 | 2026-07-20 | ENV_VARS | Config | docs/sps/plans/20260720_env_vars_ir.md | PLAN_LOCKED |
-2 0 2 6 - 0 7 - 2 0   |   E n v   V a r s   M a n a g e m e n t   ( P 0   G a p s   S t e p   2 )   |   D e p l o y E n g i n e   |   d o c s / s p s / p l a n s / 2 0 2 6 0 7 2 0 _ e n v _ v a r s _ i r . m d   |   D O N E  
- 
+| 2026-07-21 | TASK-5.10-SCAN | UX/Eng | docs/sps/decisions/20260721_project_server_edit_scan.md | COMPLETED |
+| 2026-07-21 | TASK-5.10-IR | UX/Eng | docs/sps/plans/20260721_project_server_edit_ir.md | DONE |

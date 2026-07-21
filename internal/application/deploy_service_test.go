@@ -42,6 +42,7 @@ type mockDeployProjectRepo struct {
 func (m *mockDeployProjectRepo) Save(p *domain.Project) error { return nil }
 func (m *mockDeployProjectRepo) FindByID(id uint) (*domain.Project, error) { return m.projects[id], nil }
 func (m *mockDeployProjectRepo) FindAll() ([]*domain.Project, error) { return nil, nil }
+func (m *mockDeployProjectRepo) Delete(id uint) error { return nil }
 
 type mockGitClient struct{}
 func (m *mockGitClient) CloneOrPull(r, b, p string, l chan<- string) (string, error) { return "", nil }

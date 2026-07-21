@@ -1,6 +1,7 @@
 package application
 
 import (
+	"errors"
 	"pdeploy/internal/domain"
 )
 
@@ -37,7 +38,10 @@ func (s *ProjectService) AddEnvironment(projectID uint, name, branch, deployType
 	if err != nil {
 		return nil, err
 	}
-	
+	if project == nil {
+		return nil, errors.New("project not found")
+	}
+
 	if err := project.AddEnvironment(name, branch, deployType); err != nil {
 		return nil, err
 	}
@@ -53,7 +57,10 @@ func (s *ProjectService) UpdateEnvironment(projectID uint, envName, preDeploy, p
 	if err != nil {
 		return nil, err
 	}
-	
+	if project == nil {
+		return nil, errors.New("project not found")
+	}
+
 	for _, env := range project.Environments {
 		if env.Name == envName {
 			env.PreDeploy = preDeploy
@@ -75,4 +82,41 @@ func (s *ProjectService) UpdateEnvironment(projectID uint, envName, preDeploy, p
 		return nil, err
 	}
 	return project, nil
+}
+
+// @Ref: docs/sps/plans/20260721_project_server_edit_ir.md | @Date: 2026-07-21
+func (s *ProjectService) UpdateProject(id uint, name, repoURL string) (*domain.Project, error) {
+	project, err := s.repo.FindByID(id)
+	if err != nil {
+		return nil, err
+	}
+	if project == nil {
+		return nil, errors.New("project not found")
+	}
+
+	if name != "" {
+		project.Name = name
+	}
+	if repoURL != "" {
+		project.RepoURL = repoURL
+	}
+
+	if err := s.repo.Save(project); err != nil {
+		return nil, err
+	}
+	return project, nil
+}
+
+// @Ref: docs/sps/plans/20260721_project_server_edit_ir.md | @Date: 2026-07-21
+func (s *ProjectService) DeleteProject(id uint) error {
+	project, err := s.repo.FindByID(id)
+	if err != nil {
+		return err
+	}
+	if project == nil {
+		return errors.New("project not found")
+	}
+	
+	// Delegate soft-delete/cascading to the repository
+	return s.repo.Delete(id)
 }
