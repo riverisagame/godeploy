@@ -18,15 +18,18 @@ type CommitInfo struct {
 }
 
 type Environment struct {
-	ID         uint     `json:"id"`
-	Name       string   `json:"name"`
-	Branch     string   `json:"branch"`
-	DeployType string   `json:"deploy_type"`
-	PreDeploy  string   `json:"pre_deploy"`
-	PostDeploy string   `json:"post_deploy"`
-	ServerIDs  []uint   `json:"server_ids"`
-	DeployPath string   `json:"deploy_path"`
-	EnvVars    []EnvVar `json:"env_vars"`
+	ID          uint     `json:"id"`
+	Name        string   `json:"name"`
+	Branch      string   `json:"branch"`
+	DeployType  string   `json:"deploy_type"`
+	BuildCommand string  `json:"build_command"`
+	PreDeploy   string   `json:"pre_deploy"`
+	PostDeploy  string   `json:"post_deploy"`
+	SharedDirs  string   `json:"shared_dirs"`
+	SharedFiles string   `json:"shared_files"`
+	ServerIDs   []uint   `json:"server_ids"`
+	DeployPath  string   `json:"deploy_path"`
+	EnvVars     []EnvVar `json:"env_vars"`
 }
 
 type Project struct {

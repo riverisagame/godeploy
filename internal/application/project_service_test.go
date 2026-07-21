@@ -98,7 +98,7 @@ func TestProjectService_AddAndUpdateEnvironment(t *testing.T) {
 		t.Fatalf("expected 1 environment")
 	}
 	
-	p3, err := svc.UpdateEnvironment(p.ID, "prod", "echo 'pre'", "echo 'post'", "/var/www/prod", []uint{1, 2}, nil)
+	p3, err := svc.UpdateEnvironment(p.ID, "prod", "", "echo 'pre'", "echo 'post'", "", "", "/var/www/prod", []uint{1, 2}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

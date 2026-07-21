@@ -88,11 +88,14 @@ func (h *ProjectHandler) AddEnvironment(w http.ResponseWriter, r *http.Request) 
 }
 
 type UpdateEnvReq struct {
-	PreDeploy  string `json:"pre_deploy"`
-	PostDeploy string `json:"post_deploy"`
-	ServerIDs  []uint          `json:"server_ids"`
-	DeployPath string          `json:"deploy_path"`
-	EnvVars    []domain.EnvVar `json:"env_vars"`
+	BuildCommand string          `json:"build_command"`
+	PreDeploy    string          `json:"pre_deploy"`
+	PostDeploy   string          `json:"post_deploy"`
+	SharedDirs   string          `json:"shared_dirs"`
+	SharedFiles  string          `json:"shared_files"`
+	ServerIDs    []uint          `json:"server_ids"`
+	DeployPath   string          `json:"deploy_path"`
+	EnvVars      []domain.EnvVar `json:"env_vars"`
 }
 
 func (h *ProjectHandler) UpdateEnvironment(w http.ResponseWriter, r *http.Request) {
@@ -111,7 +114,7 @@ func (h *ProjectHandler) UpdateEnvironment(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	p, err := h.svc.UpdateEnvironment(uint(id), envName, req.PreDeploy, req.PostDeploy, req.DeployPath, req.ServerIDs, req.EnvVars)
+	p, err := h.svc.UpdateEnvironment(uint(id), envName, req.BuildCommand, req.PreDeploy, req.PostDeploy, req.SharedDirs, req.SharedFiles, req.DeployPath, req.ServerIDs, req.EnvVars)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return

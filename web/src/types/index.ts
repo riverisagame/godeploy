@@ -28,8 +28,11 @@ export interface Environment {
   name: string
   branch: string
   deploy_type: string
+  build_command: string
   pre_deploy: string
   post_deploy: string
+  shared_dirs: string
+  shared_files: string
   server_ids: number[]
   deploy_path: string
   env_vars: EnvVar[]

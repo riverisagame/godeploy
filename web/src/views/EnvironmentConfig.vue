@@ -21,6 +21,24 @@
         <div class="env-content-wrapper">
           <el-form label-position="top" class="hook-form">
             <el-row :gutter="24">
+              <el-col :span="24">
+                <el-form-item label="本地构建脚本 (Build Command)">
+                  <template #label>
+                    <div class="label-with-icon">
+                      <el-icon><Cpu /></el-icon> 本地构建脚本 (Build Command)
+                    </div>
+                  </template>
+                  <el-input 
+                    v-model="env.build_command" 
+                    type="textarea" 
+                    :rows="4"
+                    placeholder="在本地机器上拉取代码后执行的命令，如: npm install && npm run build"
+                    class="code-textarea">
+                  </el-input>
+                </el-form-item>
+              </el-col>
+            </el-row>
+            <el-row :gutter="24" style="margin-top: 16px;">
               <el-col :span="12">
                 <el-form-item label="前置脚本 (Pre-Deploy)">
                   <template #label>
@@ -49,6 +67,41 @@
                     type="textarea" 
                     :rows="6"
                     placeholder="部署后执行的命令，如 systemctl restart xxx"
+                    class="code-textarea">
+                  </el-input>
+                </el-form-item>
+              </el-col>
+            </el-row>
+
+            <el-row :gutter="24" style="margin-top: 16px;">
+              <el-col :span="12">
+                <el-form-item label="共享目录 (Shared Directories)">
+                  <template #label>
+                    <div class="label-with-icon">
+                      <el-icon><Folder /></el-icon> 共享目录 (每行一个，相对路径)
+                    </div>
+                  </template>
+                  <el-input 
+                    v-model="env.shared_dirs" 
+                    type="textarea" 
+                    :rows="4"
+                    placeholder="例如:&#10;node_modules&#10;storage/logs"
+                    class="code-textarea">
+                  </el-input>
+                </el-form-item>
+              </el-col>
+              <el-col :span="12">
+                <el-form-item label="共享文件 (Shared Files)">
+                  <template #label>
+                    <div class="label-with-icon">
+                      <el-icon><Document /></el-icon> 共享文件 (每行一个，相对路径)
+                    </div>
+                  </template>
+                  <el-input 
+                    v-model="env.shared_files" 
+                    type="textarea" 
+                    :rows="4"
+                    placeholder="例如:&#10;.env&#10;config.json"
                     class="code-textarea">
                   </el-input>
                 </el-form-item>
@@ -170,7 +223,7 @@ import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api } from '../api'
 import { ElMessage } from 'element-plus'
-import { VideoPlay, VideoPause, Promotion, CopyDocument, Loading, User, Clock } from '@element-plus/icons-vue'
+import { VideoPlay, VideoPause, Promotion, CopyDocument, Loading, User, Clock, Cpu, Folder, Document } from '@element-plus/icons-vue'
 import EnvVarEditor from '../components/EnvVarEditor.vue'
 import DeployHistory from '../components/DeployHistory.vue'
 
@@ -249,8 +302,11 @@ const addEnvironment = async () => {
 const saveConfig = async (env: Environment) => {
   try {
     await api.updateEnvironment(projectId as string, env.name, {
+      build_command: env.build_command,
       pre_deploy: env.pre_deploy,
       post_deploy: env.post_deploy,
+      shared_dirs: env.shared_dirs,
+      shared_files: env.shared_files,
       deploy_path: env.deploy_path,
       server_ids: env.server_ids,
       env_vars: env.env_vars || []

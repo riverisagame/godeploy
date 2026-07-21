@@ -52,7 +52,7 @@ func (s *ProjectService) AddEnvironment(projectID uint, name, branch, deployType
 	return project, nil
 }
 
-func (s *ProjectService) UpdateEnvironment(projectID uint, envName, preDeploy, postDeploy, deployPath string, serverIDs []uint, envVars []domain.EnvVar) (*domain.Project, error) {
+func (s *ProjectService) UpdateEnvironment(projectID uint, envName, buildCommand, preDeploy, postDeploy, sharedDirs, sharedFiles, deployPath string, serverIDs []uint, envVars []domain.EnvVar) (*domain.Project, error) {
 	project, err := s.repo.FindByID(projectID)
 	if err != nil {
 		return nil, err
@@ -63,8 +63,11 @@ func (s *ProjectService) UpdateEnvironment(projectID uint, envName, preDeploy, p
 
 	for _, env := range project.Environments {
 		if env.Name == envName {
+			env.BuildCommand = buildCommand
 			env.PreDeploy = preDeploy
 			env.PostDeploy = postDeploy
+			env.SharedDirs = sharedDirs
+			env.SharedFiles = sharedFiles
 			if deployPath != "" {
 				env.DeployPath = deployPath
 			}

@@ -2,7 +2,10 @@ package application
 
 import (
 	"fmt"
+	"os"
+	"os/exec"
 	"pdeploy/internal/domain"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -146,6 +149,46 @@ func (e *DeployEngine) StartDeploy(deployment *domain.Deployment, project *domai
 		}
 		e.broadcastLog(deployment.ID, fmt.Sprintf(">>> 代码已拉取到: %s\n", workspacePath))
 
+		if len(env.EnvVars) > 0 {
+			e.broadcastLog(deployment.ID, ">>> 注入环境变量 (.env)...\n")
+			envContent := ""
+			for _, v := range env.EnvVars {
+				envContent += fmt.Sprintf("%s=%s\n", v.Key, v.Value)
+			}
+			err = os.WriteFile(fmt.Sprintf("%s/.env", workspacePath), []byte(envContent), 0644)
+			if err != nil {
+				e.broadcastLog(deployment.ID, fmt.Sprintf("WARN: 无法写入 .env 文件: %v\n", err))
+			} else {
+				e.broadcastLog(deployment.ID, ">>> .env 文件生成成功。\n")
+			}
+		}
+
+		if env.BuildCommand != "" {
+			e.broadcastLog(deployment.ID, ">>> [1.5/5] 执行本地构建...\n")
+			deployment.SetPhase("build")
+
+			var buildCmd *exec.Cmd
+			if runtime.GOOS == "windows" {
+				// On Windows, use cmd /c. But for cross-platform support we can also just run it if it's a batch file.
+				// For safety, assuming they type 'npm install && npm run build'
+				buildCmd = exec.Command("cmd", "/c", env.BuildCommand)
+			} else {
+				buildCmd = exec.Command("sh", "-c", env.BuildCommand)
+			}
+			buildCmd.Dir = workspacePath
+			
+			output, err := buildCmd.CombinedOutput()
+			if len(output) > 0 {
+				e.broadcastLog(deployment.ID, string(output)+"\n")
+			}
+			if err != nil {
+				e.broadcastLog(deployment.ID, fmt.Sprintf("ERROR: 本地构建失败: %v\n", err))
+				e.deploySvc.CompleteDeploy(deployment.ID, false, e.GetLogHistory(deployment.ID), "")
+				return
+			}
+			e.broadcastLog(deployment.ID, ">>> 本地构建完成。\n")
+		}
+
 		if len(env.ServerIDs) == 0 {
 			e.broadcastLog(deployment.ID, "ERROR: 该环境没有配置服务器。\n")
 			e.deploySvc.CompleteDeploy(deployment.ID, false, e.GetLogHistory(deployment.ID), "")
@@ -189,6 +232,51 @@ func (e *DeployEngine) StartDeploy(deployment *domain.Deployment, project *domai
 				e.broadcastLog(deployment.ID, fmt.Sprintf("ERROR: 文件同步失败: %v\n", err))
 				deployFailed = true
 				continue
+			}
+
+			// Shared Setup
+			if env.SharedDirs != "" || env.SharedFiles != "" {
+				e.broadcastLog(deployment.ID, ">>> [2.5/5] 配置共享目录/文件 (Shared)...\n")
+				
+				sharedDirPaths := strings.Split(env.SharedDirs, "\n")
+				sharedFilePaths := strings.Split(env.SharedFiles, "\n")
+				
+				sharedSetupCmd := ""
+				
+				for _, dir := range sharedDirPaths {
+					dir = strings.TrimSpace(dir)
+					if dir != "" {
+						sharedPath := fmt.Sprintf("%s/shared/%s", env.DeployPath, dir)
+						releasePath := fmt.Sprintf("%s/%s", releaseDir, dir)
+						sharedSetupCmd += fmt.Sprintf("mkdir -p %s && rm -rf %s && mkdir -p $(dirname %s) && ln -sfn %s %s && ", sharedPath, releasePath, releasePath, sharedPath, releasePath)
+					}
+				}
+				
+				for _, file := range sharedFilePaths {
+					file = strings.TrimSpace(file)
+					if file != "" {
+						sharedPath := fmt.Sprintf("%s/shared/%s", env.DeployPath, file)
+						releasePath := fmt.Sprintf("%s/%s", releaseDir, file)
+						sharedSetupCmd += fmt.Sprintf("mkdir -p $(dirname %s) && touch -a %s && rm -f %s && mkdir -p $(dirname %s) && ln -sfn %s %s && ", sharedPath, sharedPath, releasePath, releasePath, sharedPath, releasePath)
+					}
+				}
+				
+				if sharedSetupCmd != "" {
+					sharedSetupCmd += "true"
+					sharedLogChan := make(chan string, 50)
+					go func() {
+						for msg := range sharedLogChan {
+							e.broadcastLog(deployment.ID, msg)
+						}
+					}()
+					err = e.sshClient.RunCommand(srv, sharedSetupCmd, sharedLogChan)
+					close(sharedLogChan)
+					if err != nil {
+						e.broadcastLog(deployment.ID, fmt.Sprintf("ERROR: 共享目录/文件配置失败: %v\n", err))
+						deployFailed = true
+						continue
+					}
+				}
 			}
 
 			if env.PreDeploy != "" {

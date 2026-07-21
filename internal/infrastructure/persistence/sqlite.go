@@ -19,13 +19,16 @@ type EnvironmentModel struct {
 	ID         uint   `gorm:"primaryKey"`
 	ProjectID  uint   `gorm:"uniqueIndex:idx_project_env_name;index"`
 	Name       string `gorm:"uniqueIndex:idx_project_env_name"`
-	Branch     string
-	DeployType string
-	PreDeploy  string
-	PostDeploy string
-	ServerIDs  string // JSON 序列化的 []uint
-	DeployPath string
-	EnvVars    string // JSON 序列化的 []domain.EnvVar
+	Branch       string
+	DeployType   string
+	BuildCommand string
+	PreDeploy    string
+	PostDeploy   string
+	SharedDirs   string
+	SharedFiles  string
+	ServerIDs    string // JSON 序列化的 []uint
+	DeployPath   string
+	EnvVars      string // JSON 序列化的 []domain.EnvVar
 }
 
 type SqliteProjectRepository struct {
@@ -62,15 +65,18 @@ func toDomainProject(pm *ProjectModel) *domain.Project {
 			envVars = make([]domain.EnvVar, 0)
 		}
 		p.Environments = append(p.Environments, &domain.Environment{
-			ID:         em.ID,
-			Name:       em.Name,
-			Branch:     em.Branch,
-			DeployType: em.DeployType,
-			PreDeploy:  em.PreDeploy,
-			PostDeploy: em.PostDeploy,
-			ServerIDs:  serverIDs,
-			DeployPath: em.DeployPath,
-			EnvVars:    envVars,
+			ID:          em.ID,
+			Name:        em.Name,
+			Branch:      em.Branch,
+			DeployType:  em.DeployType,
+			BuildCommand: em.BuildCommand,
+			PreDeploy:   em.PreDeploy,
+			PostDeploy:  em.PostDeploy,
+			SharedDirs:  em.SharedDirs,
+			SharedFiles: em.SharedFiles,
+			ServerIDs:   serverIDs,
+			DeployPath:  em.DeployPath,
+			EnvVars:     envVars,
 		})
 	}
 	return p
@@ -88,15 +94,18 @@ func toProjectModel(p *domain.Project) *ProjectModel {
 		srvJSON, _ := json.Marshal(env.ServerIDs)
 		envVarsJSON, _ := json.Marshal(env.EnvVars)
 		pm.Environments = append(pm.Environments, EnvironmentModel{
-			ID:         env.ID,
-			Name:       env.Name,
-			Branch:     env.Branch,
-			DeployType: env.DeployType,
-			PreDeploy:  env.PreDeploy,
-			PostDeploy: env.PostDeploy,
-			ServerIDs:  string(srvJSON),
-			DeployPath: env.DeployPath,
-			EnvVars:    string(envVarsJSON),
+			ID:           env.ID,
+			Name:         env.Name,
+			Branch:       env.Branch,
+			DeployType:   env.DeployType,
+			BuildCommand: env.BuildCommand,
+			PreDeploy:    env.PreDeploy,
+			PostDeploy:   env.PostDeploy,
+			SharedDirs:   env.SharedDirs,
+			SharedFiles:  env.SharedFiles,
+			ServerIDs:    string(srvJSON),
+			DeployPath:   env.DeployPath,
+			EnvVars:      string(envVarsJSON),
 		})
 	}
 	return pm
