@@ -1,7 +1,7 @@
 package application
 
 import (
-	"pdeploy/internal/domain"
+	"github.com/riverisagame/godeploy/internal/domain"
 	"testing"
 )
 

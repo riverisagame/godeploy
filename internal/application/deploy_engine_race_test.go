@@ -1,7 +1,7 @@
 package application_test
 
 import (
-	"pdeploy/internal/application"
+	"github.com/riverisagame/godeploy/internal/application"
 	"sync"
 	"testing"
 )

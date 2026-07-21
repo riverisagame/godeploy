@@ -3,7 +3,7 @@ package application
 import (
 	"context"
 	"fmt"
-	"pdeploy/internal/domain"
+	"github.com/riverisagame/godeploy/internal/domain"
 	"strings"
 	"sync"
 	"time"

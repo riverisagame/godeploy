@@ -4,7 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
-	"pdeploy/internal/interfaces/api"
+	"github.com/riverisagame/godeploy/internal/interfaces/api"
 	"testing"
 	"time"
 

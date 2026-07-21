@@ -6,7 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"pdeploy/internal/domain"
+	"github.com/riverisagame/godeploy/internal/domain"
 	"strings"
 	"sync"
 )

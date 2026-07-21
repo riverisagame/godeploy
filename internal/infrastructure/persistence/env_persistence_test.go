@@ -1,7 +1,7 @@
 package persistence
 
 import (
-	"pdeploy/internal/domain"
+	"github.com/riverisagame/godeploy/internal/domain"
 	"testing"
 
 	"github.com/glebarez/sqlite"

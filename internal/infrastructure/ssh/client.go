@@ -7,7 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"pdeploy/internal/domain"
+	"github.com/riverisagame/godeploy/internal/domain"
 	"runtime"
 
 	"golang.org/x/crypto/ssh"

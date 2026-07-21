@@ -4,7 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"pdeploy/internal/infrastructure/git"
+	"github.com/riverisagame/godeploy/internal/infrastructure/git"
 	"testing"
 )
 

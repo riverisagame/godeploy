@@ -4,7 +4,7 @@ import (
 	"embed"
 	"io/fs"
 	"net/http"
-	"pdeploy/internal/application"
+	"github.com/riverisagame/godeploy/internal/application"
 	"strings"
 )
 

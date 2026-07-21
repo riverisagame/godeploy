@@ -1,7 +1,7 @@
 package persistence_test
 
 import (
-	"pdeploy/internal/infrastructure/persistence"
+	"github.com/riverisagame/godeploy/internal/infrastructure/persistence"
 	"testing"
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"

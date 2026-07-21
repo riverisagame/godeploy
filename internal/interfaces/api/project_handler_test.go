@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"pdeploy/internal/application"
-	"pdeploy/internal/domain"
+	"github.com/riverisagame/godeploy/internal/application"
+	"github.com/riverisagame/godeploy/internal/domain"
 	"testing"
 )
 

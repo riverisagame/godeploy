@@ -1,8 +1,8 @@
 package application_test
 
 import (
-	"pdeploy/internal/application"
-	"pdeploy/internal/infrastructure/persistence"
+	"github.com/riverisagame/godeploy/internal/application"
+	"github.com/riverisagame/godeploy/internal/infrastructure/persistence"
 	"testing"
 
 	"github.com/glebarez/sqlite"

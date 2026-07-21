@@ -2,7 +2,7 @@ package persistence
 
 import (
 	"encoding/json"
-	"pdeploy/internal/domain"
+	"github.com/riverisagame/godeploy/internal/domain"
 	"gorm.io/gorm"
 )
 

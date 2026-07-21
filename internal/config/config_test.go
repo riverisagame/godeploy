@@ -2,7 +2,7 @@ package config_test
 
 import (
 	"os"
-	"pdeploy/internal/config"
+	"github.com/riverisagame/godeploy/internal/config"
 	"testing"
 )
 

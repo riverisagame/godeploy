@@ -2,7 +2,7 @@ package application
 
 import (
 	"errors"
-	"pdeploy/internal/domain"
+	"github.com/riverisagame/godeploy/internal/domain"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"

@@ -1,6 +1,6 @@
 package application
 
-import "pdeploy/internal/domain"
+import "github.com/riverisagame/godeploy/internal/domain"
 
 // SSHClient 远程服务器命令执行与文件同步接口
 type SSHClient interface {
