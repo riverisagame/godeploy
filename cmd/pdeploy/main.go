@@ -40,7 +40,7 @@ func main() {
 	}
 
 	err = db.AutoMigrate(
-		&persistence.ProjectModel{}, 
+		&persistence.ProjectModel{},
 		&persistence.EnvironmentModel{},
 		&persistence.ServerModel{},
 		&persistence.DeploymentModel{},
@@ -61,7 +61,7 @@ func main() {
 
 	userRepo := persistence.NewSqliteUserRepository(db)
 	authSvc := application.NewAuthService(userRepo, cfg.JWTSecret)
-	
+
 	// Create default admin user if none exists
 	if err := authSvc.InitAdminUser("admin", "admin123"); err != nil {
 		log.Printf("Failed to init default admin user: %v", err)

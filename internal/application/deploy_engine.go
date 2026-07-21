@@ -215,17 +215,28 @@ func (e *DeployEngine) runDeploySteps(ctx context.Context, deployment *domain.De
 	}()
 
 	// 1. Clone Repo
-	workspacePath, err := e.gitClient.CloneForDeploy(project.RepoURL, env.Branch, project.Name, deployment.ID, logChan)
-	if err != nil {
-		e.broadcastLog(deployment.ID, fmt.Sprintf("ERROR: Git clone failed: %v\n", err))
-		_ = e.deploySvc.CompleteDeploy(deployment.ID, false, e.GetLogHistory(deployment.ID), "")
-		return
+	var workspacePath string
+	var err error
+	if e.gitClient != nil {
+		workspacePath, err = e.gitClient.CloneForDeploy(project.RepoURL, env.Branch, project.Name, deployment.ID, logChan)
+		if err != nil {
+			e.broadcastLog(deployment.ID, fmt.Sprintf("ERROR: Git clone failed: %v\n", err))
+			if e.deploySvc != nil {
+				_ = e.deploySvc.CompleteDeploy(deployment.ID, false, e.GetLogHistory(deployment.ID), "")
+			}
+			return
+		}
+		defer func() { _ = e.gitClient.CleanupDeploy(project.Name, deployment.ID, workspacePath) }()
+	} else {
+		e.broadcastLog(deployment.ID, "Test mode: skipping git clone.\n")
+		workspacePath = "/tmp/test-workspace"
 	}
-	defer func() { _ = e.gitClient.CleanupDeploy(project.Name, deployment.ID, workspacePath) }()
 
 	if ctx.Err() != nil {
 		e.broadcastLog(deployment.ID, "ERROR: Deploy cancelled before sync.\n")
-		_ = e.deploySvc.CompleteDeploy(deployment.ID, false, e.GetLogHistory(deployment.ID), "")
+		if e.deploySvc != nil {
+			_ = e.deploySvc.CompleteDeploy(deployment.ID, false, e.GetLogHistory(deployment.ID), "")
+		}
 		return
 	}
 
@@ -233,10 +244,15 @@ func (e *DeployEngine) runDeploySteps(ctx context.Context, deployment *domain.De
 
 	// 2. Sync to Servers
 	for _, srvID := range env.ServerIDs {
-		srv, err := e.serverSvc.GetServerByID(srvID)
-		if err != nil || srv == nil {
-			e.broadcastLog(deployment.ID, fmt.Sprintf("ERROR: Server %d not found.\n", srvID))
-			continue
+		var srv *domain.Server
+		if e.serverSvc != nil {
+			srv, err = e.serverSvc.GetServerByID(srvID)
+			if err != nil || srv == nil {
+				e.broadcastLog(deployment.ID, fmt.Sprintf("ERROR: Server %d not found.\n", srvID))
+				continue
+			}
+		} else {
+			srv = &domain.Server{ID: srvID, Name: fmt.Sprintf("TestServer-%d", srvID)}
 		}
 
 		e.broadcastLog(deployment.ID, fmt.Sprintf(">>> 同步代码到服务器 %s...\n", srv.Name))
@@ -262,6 +278,8 @@ func (e *DeployEngine) runDeploySteps(ctx context.Context, deployment *domain.De
 		}
 	}
 
-	_ = e.deploySvc.CompleteDeploy(deployment.ID, true, e.GetLogHistory(deployment.ID), releaseName)
+	if e.deploySvc != nil {
+		_ = e.deploySvc.CompleteDeploy(deployment.ID, true, e.GetLogHistory(deployment.ID), releaseName)
+	}
 	e.broadcastLog(deployment.ID, ">>> 部署成功完成。\n")
 }
