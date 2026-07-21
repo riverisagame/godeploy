@@ -11,6 +11,7 @@ import (
 )
 
 type contextKey string
+
 const ContextKeyUserID contextKey = "user_id"
 const ContextKeyRole contextKey = "role"
 
@@ -109,7 +110,7 @@ func (m *LoggingMiddleware) Wrap(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// We use a custom ResponseWriter to capture the status code
 		rw := &responseWriter{w, http.StatusOK}
-		
+
 		// Wait, instead of implementing full responseWriter, we can just do basic log
 		log.Printf("[REQ] %s %s", r.Method, r.URL.Path)
 		next.ServeHTTP(rw, r)
@@ -126,7 +127,6 @@ func (rw *responseWriter) WriteHeader(code int) {
 	rw.statusCode = code
 	rw.ResponseWriter.WriteHeader(code)
 }
-
 
 // RecoveryMiddleware 捕获所有的 panic 并返回 500 标准 JSON 错误
 type RecoveryMiddleware struct{}

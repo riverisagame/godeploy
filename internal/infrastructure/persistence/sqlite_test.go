@@ -1,10 +1,10 @@
 package persistence
 
 import (
-	"github.com/riverisagame/godeploy/internal/domain"
-	"testing"
 	"github.com/glebarez/sqlite"
+	"github.com/riverisagame/godeploy/internal/domain"
 	"gorm.io/gorm"
+	"testing"
 )
 
 func setupTestDB(t *testing.T) *gorm.DB {
@@ -12,13 +12,13 @@ func setupTestDB(t *testing.T) *gorm.DB {
 	if err != nil {
 		t.Fatalf("Failed to open DB: %v", err)
 	}
-	
+
 	// Create table for ProjectModel and EnvironmentModel
 	err = db.AutoMigrate(&ProjectModel{}, &EnvironmentModel{})
 	if err != nil {
 		t.Fatalf("Failed to migrate: %v", err)
 	}
-	
+
 	return db
 }
 
@@ -28,7 +28,7 @@ func TestSqliteProjectRepository_SaveAndFind(t *testing.T) {
 
 	p, _ := domain.NewProject("test-infra", "git@git")
 	_ = p.AddEnvironment("prod", "main", "symlink")
-	
+
 	err := repo.Save(p)
 	if err != nil {
 		t.Fatalf("Expected no error on save, got %v", err)

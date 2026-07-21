@@ -1,11 +1,11 @@
 package persistence_test
 
 import (
+	"github.com/glebarez/sqlite"
 	"github.com/riverisagame/godeploy/internal/domain"
 	"github.com/riverisagame/godeploy/internal/infrastructure/persistence"
-	"testing"
-	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
+	"testing"
 )
 
 func TestDatabaseCascadeDeletes(t *testing.T) {
@@ -13,7 +13,7 @@ func TestDatabaseCascadeDeletes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to open DB: %v", err)
 	}
-	
+
 	// SQLite needs PRAGMA foreign_keys = ON for cascade to work
 	db.Exec("PRAGMA foreign_keys = ON")
 
@@ -34,7 +34,7 @@ func TestDatabaseCascadeDeletes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to save project: %v", err)
 	}
-	
+
 	found, _ := projectRepo.FindByID(p.ID)
 	envID := found.Environments[0].ID
 
@@ -50,7 +50,7 @@ func TestDatabaseCascadeDeletes(t *testing.T) {
 	}
 
 	// Delete Project -> should cascade delete Environment -> should cascade delete Deployment
-	// For cascade delete using GORM, we can either use Repo delete (if we implement it) 
+	// For cascade delete using GORM, we can either use Repo delete (if we implement it)
 	// or directly delete the model via db
 	db.Delete(&persistence.ProjectModel{}, p.ID)
 

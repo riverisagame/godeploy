@@ -38,7 +38,7 @@ func (m *mockGitClient) FetchAndGetCommits(r, b, p, f string) ([]domain.CommitIn
 func TestDeployEngine_DependencyInversion(t *testing.T) {
 	sshClient := &mockSSHClient{}
 	gitClient := &mockGitClient{}
-	
+
 	// Should accept interfaces and ServerService, not concrete types or Repo directly
 	_ = application.NewDeployEngine(sshClient, gitClient, nil, nil)
 }
@@ -62,7 +62,7 @@ func TestDeployEngine_Subscribe_ReceivesHistory(t *testing.T) {
 
 	// We expect the channel to immediately receive the history
 	receivedLogs := []string{}
-	
+
 	// Read with a short timeout
 	done := make(chan bool)
 	go func() {

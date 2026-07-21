@@ -45,7 +45,7 @@ func (s *ProjectService) AddEnvironment(projectID uint, name, branch, deployType
 	if err := project.AddEnvironment(name, branch, deployType); err != nil {
 		return nil, err
 	}
-	
+
 	if err := s.repo.Save(project); err != nil {
 		return nil, err
 	}
@@ -80,7 +80,7 @@ func (s *ProjectService) UpdateEnvironment(projectID uint, envName, buildCommand
 			break
 		}
 	}
-	
+
 	if err := s.repo.Save(project); err != nil {
 		return nil, err
 	}
@@ -119,7 +119,7 @@ func (s *ProjectService) DeleteProject(id uint) error {
 	if project == nil {
 		return errors.New("project not found")
 	}
-	
+
 	// Delegate soft-delete/cascading to the repository
 	return s.repo.Delete(id)
 }

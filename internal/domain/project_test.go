@@ -27,7 +27,7 @@ func TestNewProject(t *testing.T) {
 
 func TestAddEnvironment(t *testing.T) {
 	p, _ := NewProject("demo", "git@github.com:demo/demo.git")
-	
+
 	err := p.AddEnvironment("dev", "develop", "symlink")
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
@@ -47,7 +47,7 @@ func TestEnvironmentEnvVars(t *testing.T) {
 	p, _ := NewProject("demo", "git@github.com:demo/demo.git")
 	_ = p.AddEnvironment("prod", "main", "symlink")
 	env := p.Environments[0]
-	
+
 	if len(env.EnvVars) != 0 {
 		t.Fatalf("Expected 0 env vars initially")
 	}

@@ -1,10 +1,10 @@
 package git_test
 
 import (
+	"github.com/riverisagame/godeploy/internal/infrastructure/git"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"github.com/riverisagame/godeploy/internal/infrastructure/git"
 	"testing"
 )
 
@@ -19,7 +19,7 @@ func TestClient_CloneOrPullWorktree(t *testing.T) {
 	projectName := "test-worktree"
 	deployID1 := uint(100)
 	deployID2 := uint(101)
-	
+
 	logChan1 := make(chan string, 100)
 	logChan2 := make(chan string, 100)
 
@@ -28,7 +28,7 @@ func TestClient_CloneOrPullWorktree(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CloneForDeploy 1 failed: %v", err)
 	}
-	
+
 	if _, err := os.Stat(filepath.Join(path1, "file1.txt")); os.IsNotExist(err) {
 		t.Errorf("expected file1.txt in worktree 1")
 	}
@@ -42,7 +42,7 @@ func TestClient_CloneOrPullWorktree(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(path2, "file2.txt")); os.IsNotExist(err) {
 		t.Errorf("expected file2.txt in worktree 2")
 	}
-	
+
 	if path1 == path2 {
 		t.Errorf("expected different paths for concurrent deploys, got %s", path1)
 	}
@@ -97,12 +97,12 @@ func createMockRepo(t *testing.T, path string) {
 	runCmd(t, path, "git", "init", "-b", "main")
 	runCmd(t, path, "git", "config", "user.name", "TestUser")
 	runCmd(t, path, "git", "config", "user.email", "test@test.com")
-	
+
 	// Create first commit
 	_ = os.WriteFile(path+"/file1.txt", []byte("hello"), 0644)
 	runCmd(t, path, "git", "add", ".")
 	runCmd(t, path, "git", "commit", "-m", "first commit")
-	
+
 	// Create second commit
 	_ = os.WriteFile(path+"/file2.txt", []byte("world"), 0644)
 	runCmd(t, path, "git", "add", ".")

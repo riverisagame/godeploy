@@ -31,7 +31,7 @@ func TestServerCustomAuth(t *testing.T) {
 	if srv.User != "deployer" {
 		t.Errorf("expected User 'deployer', got '%s'", srv.User)
 	}
-	
+
 	if srv.KeyPath != "~/.ssh/custom_rsa" {
 		t.Errorf("expected KeyPath '~/.ssh/custom_rsa', got '%s'", srv.KeyPath)
 	}

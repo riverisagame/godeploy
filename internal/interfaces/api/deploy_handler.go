@@ -3,9 +3,9 @@ package api
 import (
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"github.com/riverisagame/godeploy/internal/application"
 	"github.com/riverisagame/godeploy/internal/domain"
+	"net/http"
 	"strconv"
 	"strings"
 )
@@ -44,7 +44,7 @@ func (h *DeployHandler) StartDeploy(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	
+
 	var targetProject *domain.Project
 	var env *domain.Environment
 	for _, prj := range projects {
@@ -59,7 +59,7 @@ func (h *DeployHandler) StartDeploy(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 	}
-	
+
 	if env == nil || targetProject == nil {
 		http.Error(w, "environment or project not found", http.StatusNotFound)
 		return
@@ -105,12 +105,12 @@ func (h *DeployHandler) StreamLogs(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	// CORS headers if needed
-	
+
 	logChan := h.engine.Subscribe(uint(deployID))
-	
+
 	// Ensure we handle client disconnect
 	ctx := r.Context()
-	
+
 	for {
 		select {
 		case msg, ok := <-logChan:
@@ -119,7 +119,7 @@ func (h *DeployHandler) StreamLogs(w http.ResponseWriter, r *http.Request) {
 				flusher.Flush()
 				return
 			}
-			
+
 			// Format as SSE event
 			// JSON escape or just pass string since SSE handles raw strings, but multiline needs care.
 			// Let's replace newlines if needed, or send line by line.
@@ -128,7 +128,7 @@ func (h *DeployHandler) StreamLogs(w http.ResponseWriter, r *http.Request) {
 				_, _ = fmt.Fprintf(w, "data: %s\n\n", line)
 			}
 			flusher.Flush()
-			
+
 		case <-ctx.Done():
 			// Client disconnected
 			return
@@ -216,7 +216,7 @@ func (h *DeployHandler) Cancel(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.engine.CancelDeploy(uint(deployID))
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	RespondJSON(w, map[string]string{"message": "Deployment cancellation requested"})

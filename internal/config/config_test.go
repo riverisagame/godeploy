@@ -1,8 +1,8 @@
 package config_test
 
 import (
-	"os"
 	"github.com/riverisagame/godeploy/internal/config"
+	"os"
 	"testing"
 )
 
@@ -11,7 +11,7 @@ func TestLoadConfig_Defaults(t *testing.T) {
 	_ = os.Unsetenv("PORT")
 	_ = os.Unsetenv("DB_PATH")
 	_ = os.Unsetenv("WORKSPACE_DIR")
-	os.Unsetenv("JWT_SECRET")
+	_ = os.Unsetenv("JWT_SECRET")
 
 	cfg := config.Load()
 
@@ -33,10 +33,10 @@ func TestLoadConfig_EnvVars(t *testing.T) {
 	_ = os.Setenv("PORT", "9090")
 	_ = os.Setenv("DB_PATH", "custom.db")
 	_ = os.Setenv("WORKSPACE_DIR", "/tmp/ws")
-	os.Setenv("JWT_SECRET", "super-secret")
+	_ = os.Setenv("JWT_SECRET", "super-secret")
 	defer func() {
-		os.Unsetenv("PORT")
-		os.Unsetenv("DB_PATH")
+		_ = os.Unsetenv("PORT")
+		_ = os.Unsetenv("DB_PATH")
 		os.Unsetenv("WORKSPACE_DIR")
 		os.Unsetenv("JWT_SECRET")
 	}()

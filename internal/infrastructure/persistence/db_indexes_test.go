@@ -1,10 +1,10 @@
 package persistence_test
 
 import (
-	"github.com/riverisagame/godeploy/internal/infrastructure/persistence"
-	"testing"
 	"github.com/glebarez/sqlite"
+	"github.com/riverisagame/godeploy/internal/infrastructure/persistence"
 	"gorm.io/gorm"
+	"testing"
 )
 
 func TestDatabaseIndexes_UniqueConstraints(t *testing.T) {

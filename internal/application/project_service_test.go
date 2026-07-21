@@ -48,9 +48,9 @@ func TestProjectService_UpdateProject(t *testing.T) {
 	// [RED] Edge Cases Test for UpdateProject
 	repo := &mockProjectRepo{projects: make(map[uint]*domain.Project)}
 	svc := NewProjectService(repo)
-	
+
 	p, _ := svc.CreateProject("old-name", "git@github.com:test/old.git")
-	
+
 	p2, err := svc.UpdateProject(p.ID, "new-name", "git@github.com:test/new.git")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -58,7 +58,7 @@ func TestProjectService_UpdateProject(t *testing.T) {
 	if p2.Name != "new-name" || p2.RepoURL != "git@github.com:test/new.git" {
 		t.Errorf("expected project to be updated, got: %v", p2)
 	}
-	
+
 	// Edge Case: Invalid project
 	_, err = svc.UpdateProject(999, "name", "repo")
 	if err == nil {
@@ -70,13 +70,13 @@ func TestProjectService_DeleteProject(t *testing.T) {
 	// [RED] Edge Cases Test for DeleteProject
 	repo := &mockProjectRepo{projects: make(map[uint]*domain.Project)}
 	svc := NewProjectService(repo)
-	
+
 	p, _ := svc.CreateProject("to-delete", "git@github.com:test/del.git")
 	err := svc.DeleteProject(p.ID)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	
+
 	pFound, _ := repo.FindByID(p.ID)
 	if pFound != nil {
 		t.Errorf("expected project to be deleted from repo")
@@ -88,21 +88,21 @@ func TestProjectService_AddAndUpdateEnvironment(t *testing.T) {
 	svc := NewProjectService(repo)
 
 	p, _ := svc.CreateProject("test-proj", "git@github.com:test/repo.git")
-	
+
 	p2, err := svc.AddEnvironment(p.ID, "prod", "main", "symlink")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	
+
 	if len(p2.Environments) != 1 {
 		t.Fatalf("expected 1 environment")
 	}
-	
+
 	p3, err := svc.UpdateEnvironment(p.ID, "prod", "", "echo 'pre'", "echo 'post'", "", "", "/var/www/prod", []uint{1, 2}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	
+
 	if p3.Environments[0].PreDeploy != "echo 'pre'" {
 		t.Errorf("expected pre-deploy hook to be updated")
 	}

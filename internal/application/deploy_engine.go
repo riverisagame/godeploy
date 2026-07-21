@@ -10,18 +10,18 @@ import (
 )
 
 type DeployEngine struct {
-	sshClient   SSHClient
-	gitClient   GitClient
-	serverSvc   *ServerService
-	deploySvc   *DeployService
-	
+	sshClient SSHClient
+	gitClient GitClient
+	serverSvc *ServerService
+	deploySvc *DeployService
+
 	// Real-time log broadcasting
 	subscribers map[uint][]chan string
 	subMu       sync.RWMutex
-	
+
 	// Log history
-	logHistory  map[uint][]string
-	historyMu   sync.RWMutex
+	logHistory map[uint][]string
+	historyMu  sync.RWMutex
 
 	// Concurrency control per environment
 	deployLocks map[string]*sync.Mutex
@@ -60,7 +60,7 @@ func (e *DeployEngine) Subscribe(deployID uint) chan string {
 	defer e.subMu.Unlock()
 	ch := make(chan string, 100)
 	e.subscribers[deployID] = append(e.subscribers[deployID], ch)
-	
+
 	e.historyMu.RLock()
 	defer e.historyMu.RUnlock()
 	if history, ok := e.logHistory[deployID]; ok {
@@ -174,7 +174,7 @@ func (e *DeployEngine) Rollback(deployment *domain.Deployment, env *domain.Envir
 
 			if env.PostDeploy != "" {
 				e.broadcastLog(deployment.ID, ">>> 执行后置脚本...\n")
-				
+
 				safeCmd, validErr := ValidateAndFormat(env.PostDeploy, nil)
 				if validErr != nil {
 					e.broadcastLog(deployment.ID, fmt.Sprintf("ERROR: 后置脚本不合法 (白名单拦截): %v\n", validErr))
@@ -240,9 +240,9 @@ func (e *DeployEngine) runDeploySteps(ctx context.Context, deployment *domain.De
 		}
 
 		e.broadcastLog(deployment.ID, fmt.Sprintf(">>> 同步代码到服务器 %s...\n", srv.Name))
-		
+
 		remoteReleasePath := fmt.Sprintf("%s/releases/%s", env.DeployPath, releaseName)
-		
+
 		if e.sshClient != nil {
 			err = e.sshClient.SyncFiles(srv, workspacePath, remoteReleasePath, "", logChan)
 			if err != nil {
@@ -262,6 +262,6 @@ func (e *DeployEngine) runDeploySteps(ctx context.Context, deployment *domain.De
 		}
 	}
 
-	e.deploySvc.CompleteDeploy(deployment.ID, true, e.GetLogHistory(deployment.ID), releaseName)
+	_ = e.deploySvc.CompleteDeploy(deployment.ID, true, e.GetLogHistory(deployment.ID), releaseName)
 	e.broadcastLog(deployment.ID, ">>> 部署成功完成。\n")
 }

@@ -2,9 +2,9 @@ package api_test
 
 import (
 	"context"
+	"github.com/riverisagame/godeploy/internal/interfaces/api"
 	"net/http"
 	"net/http/httptest"
-	"github.com/riverisagame/godeploy/internal/interfaces/api"
 	"testing"
 	"time"
 
@@ -85,7 +85,7 @@ func TestRequireAdminMiddleware(t *testing.T) {
 	handler := api.RequireAdmin(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
-	
+
 	// Case 1: No Role in Context (Not Admin)
 	req1 := httptest.NewRequest("GET", "/admin", nil)
 	w1 := httptest.NewRecorder()

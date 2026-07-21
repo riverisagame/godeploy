@@ -29,12 +29,12 @@ func NewSqliteDeploymentRepository(db *gorm.DB) *SqliteDeploymentRepository {
 
 func (r *SqliteDeploymentRepository) Save(d *domain.Deployment) error {
 	model := &DeploymentModel{
-		EnvID:      d.EnvID,
-		UserID:     d.UserID,
-		CommitHash: d.CommitHash,
-		Status:     d.Status,
-		Phase:      d.Phase,
-		Log:        d.Log,
+		EnvID:       d.EnvID,
+		UserID:      d.UserID,
+		CommitHash:  d.CommitHash,
+		Status:      d.Status,
+		Phase:       d.Phase,
+		Log:         d.Log,
 		ReleaseName: d.ReleaseName,
 	}
 	if d.ID != 0 {
@@ -53,15 +53,15 @@ func (r *SqliteDeploymentRepository) FindByID(id uint) (*domain.Deployment, erro
 		return nil, err
 	}
 	return &domain.Deployment{
-		ID:         model.ID,
-		EnvID:      model.EnvID,
-		UserID:     model.UserID,
-		CommitHash: model.CommitHash,
-		Status:     model.Status,
-		Phase:      model.Phase,
-		Log:        model.Log,
+		ID:          model.ID,
+		EnvID:       model.EnvID,
+		UserID:      model.UserID,
+		CommitHash:  model.CommitHash,
+		Status:      model.Status,
+		Phase:       model.Phase,
+		Log:         model.Log,
 		ReleaseName: model.ReleaseName,
-		CreatedAt:  model.CreatedAt,
+		CreatedAt:   model.CreatedAt,
 	}, nil
 }
 
@@ -73,15 +73,15 @@ func (r *SqliteDeploymentRepository) FindByEnvID(envID uint) ([]*domain.Deployme
 	var res []*domain.Deployment
 	for _, m := range models {
 		res = append(res, &domain.Deployment{
-			ID:         m.ID,
-			EnvID:      m.EnvID,
-			UserID:     m.UserID,
-			CommitHash: m.CommitHash,
-			Status:     m.Status,
-			Phase:      m.Phase,
-			Log:        m.Log,
+			ID:          m.ID,
+			EnvID:       m.EnvID,
+			UserID:      m.UserID,
+			CommitHash:  m.CommitHash,
+			Status:      m.Status,
+			Phase:       m.Phase,
+			Log:         m.Log,
 			ReleaseName: m.ReleaseName,
-			CreatedAt:  m.CreatedAt,
+			CreatedAt:   m.CreatedAt,
 		})
 	}
 	return res, nil

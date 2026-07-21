@@ -4,11 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"net/http"
-	"net/http/httptest"
 	"github.com/riverisagame/godeploy/internal/application"
 	"github.com/riverisagame/godeploy/internal/domain"
 	"github.com/riverisagame/godeploy/internal/interfaces/api"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 )
 
@@ -21,12 +21,13 @@ func (m *mockDeployRepo) Save(d *domain.Deployment) error {
 	d.ID = uint(len(m.savedDeployments))
 	return nil
 }
-func (m *mockDeployRepo) FindByID(id uint) (*domain.Deployment, error) { return nil, nil }
+func (m *mockDeployRepo) FindByID(id uint) (*domain.Deployment, error)         { return nil, nil }
 func (m *mockDeployRepo) FindByEnvID(envID uint) ([]*domain.Deployment, error) { return nil, nil }
-func (m *mockDeployRepo) Update(d *domain.Deployment) error { return nil }
+func (m *mockDeployRepo) Update(d *domain.Deployment) error                    { return nil }
 
 type mockProjectRepo struct{}
-func (m *mockProjectRepo) Save(p *domain.Project) error { return nil }
+
+func (m *mockProjectRepo) Save(p *domain.Project) error              { return nil }
 func (m *mockProjectRepo) FindByID(id uint) (*domain.Project, error) { return nil, nil }
 func (m *mockProjectRepo) FindAll() ([]*domain.Project, error) {
 	return []*domain.Project{
@@ -34,7 +35,7 @@ func (m *mockProjectRepo) FindAll() ([]*domain.Project, error) {
 			ID: 100, // ProjectID = 100
 			Environments: []*domain.Environment{
 				{
-					ID: 200, // EnvID = 200
+					ID:   200, // EnvID = 200
 					Name: "prod",
 				},
 			},
@@ -67,7 +68,7 @@ func TestDeployHandler_StartDeploy_UsesEnvID(t *testing.T) {
 	body, _ := json.Marshal(reqBody)
 	req, _ := http.NewRequest("POST", "/api/deployments", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
-	
+
 	ctx := context.WithValue(req.Context(), api.ContextKeyUserID, float64(123))
 	ctx = context.WithValue(ctx, api.ContextKeyRole, "admin")
 	req = req.WithContext(ctx)

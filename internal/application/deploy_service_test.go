@@ -39,10 +39,13 @@ func (m *mockDeployRepo) FindByEnvID(envID uint) ([]*domain.Deployment, error) {
 type mockDeployProjectRepo struct {
 	projects map[uint]*domain.Project
 }
+
 func (m *mockDeployProjectRepo) Save(p *domain.Project) error { return nil }
-func (m *mockDeployProjectRepo) FindByID(id uint) (*domain.Project, error) { return m.projects[id], nil }
+func (m *mockDeployProjectRepo) FindByID(id uint) (*domain.Project, error) {
+	return m.projects[id], nil
+}
 func (m *mockDeployProjectRepo) FindAll() ([]*domain.Project, error) { return nil, nil }
-func (m *mockDeployProjectRepo) Delete(id uint) error { return nil }
+func (m *mockDeployProjectRepo) Delete(id uint) error                { return nil }
 
 type mockGitClient struct{}
 
@@ -88,14 +91,14 @@ func TestDeployService_CompleteDeploy(t *testing.T) {
 	projRepo := &mockProjectRepo{projects: make(map[uint]*domain.Project)}
 	gitClient := &mockGitClient{}
 	svc := NewDeployService(repo, projRepo, gitClient)
-	
+
 	d, _ := svc.TriggerDeploy(1, 1, "hash123")
-	
+
 	err := svc.CompleteDeploy(d.ID, true, "deployed successfully", "release_v1")
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
 	}
-	
+
 	saved, _ := repo.FindByID(d.ID)
 	if saved.Status != "success" {
 		t.Errorf("Expected status success, got %s", saved.Status)

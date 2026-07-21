@@ -3,10 +3,10 @@ package git
 import (
 	"bufio"
 	"fmt"
+	"github.com/riverisagame/godeploy/internal/domain"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"github.com/riverisagame/godeploy/internal/domain"
 	"strings"
 	"sync"
 )
@@ -74,18 +74,18 @@ func (c *Client) CloneForDeploy(repoURL, branch, projectName string, deployID ui
 // CleanupDeploy removes the temporary worktree after deployment finishes.
 func (c *Client) CleanupDeploy(projectName string, deployID uint, deployPath string) error {
 	bareRepoPath := filepath.Join(c.workspaceBase, projectName+".git")
-	
+
 	// Remove directory
 	if err := os.RemoveAll(deployPath); err != nil {
 		return err
 	}
-	
+
 	// Prune worktree
 	// We run it silently since logChan might be closed
 	cmd := exec.Command("git", "worktree", "prune")
 	cmd.Dir = bareRepoPath
 	_ = cmd.Run()
-	
+
 	return nil
 }
 

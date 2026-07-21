@@ -3,11 +3,11 @@ package ssh
 import (
 	"bufio"
 	"fmt"
+	"github.com/riverisagame/godeploy/internal/domain"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"github.com/riverisagame/godeploy/internal/domain"
 	"runtime"
 
 	"golang.org/x/crypto/ssh"
@@ -148,8 +148,8 @@ func (c *Client) SyncFiles(server *domain.Server, localPath, remotePath, linkDes
 		rsyncArgs = append(rsyncArgs, fmt.Sprintf("--link-dest=%s", linkDest))
 	}
 
-	rsyncArgs = append(rsyncArgs, 
-		localPath+"/", 
+	rsyncArgs = append(rsyncArgs,
+		localPath+"/",
 		fmt.Sprintf("%s@%s:%s/", user, server.IP, remotePath),
 	)
 

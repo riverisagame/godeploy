@@ -3,9 +3,9 @@ package api
 import (
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"github.com/riverisagame/godeploy/internal/application"
 	"github.com/riverisagame/godeploy/internal/domain"
+	"net/http"
 )
 
 type ServerHandler struct {
@@ -30,7 +30,7 @@ func (h *ServerHandler) List(w http.ResponseWriter, r *http.Request) {
 		RespondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	
+
 	if servers == nil {
 		servers = make([]*domain.Server, 0)
 	}

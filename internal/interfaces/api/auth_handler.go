@@ -2,8 +2,8 @@ package api
 
 import (
 	"encoding/json"
-	"net/http"
 	"github.com/riverisagame/godeploy/internal/application"
+	"net/http"
 )
 
 type AuthHandler struct {

@@ -77,4 +77,3 @@ func (r *SqliteServerRepository) FindByID(id uint) (*domain.Server, error) {
 func (r *SqliteServerRepository) Delete(id uint) error {
 	return r.db.Delete(&ServerModel{}, id).Error
 }
-

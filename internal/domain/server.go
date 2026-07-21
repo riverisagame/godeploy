@@ -18,29 +18,29 @@ type Server struct {
 }
 
 func NewServer(name, ip string, port int, user, keyPath string) (*Server, error) {
-		if name == "" {
-			return nil, errors.New("server name cannot be empty")
-		}
-		if ip == "" {
-			return nil, errors.New("server IP cannot be empty")
-		}
-		if net.ParseIP(ip) == nil {
-			return nil, errors.New("invalid IP address format")
-		}
-		if port == 0 {
-			port = 22
-		} else if port < 1 || port > 65535 {
-			return nil, errors.New("port must be between 1 and 65535")
-		}
-		if user == "" {
-			user = "root"
-		}
-		if shellMetaRegex.MatchString(user) {
-			return nil, errors.New("user contains invalid characters")
-		}
-		if keyPath != "" && shellMetaRegex.MatchString(keyPath) {
-			return nil, errors.New("keyPath contains invalid characters")
-		}
+	if name == "" {
+		return nil, errors.New("server name cannot be empty")
+	}
+	if ip == "" {
+		return nil, errors.New("server IP cannot be empty")
+	}
+	if net.ParseIP(ip) == nil {
+		return nil, errors.New("invalid IP address format")
+	}
+	if port == 0 {
+		port = 22
+	} else if port < 1 || port > 65535 {
+		return nil, errors.New("port must be between 1 and 65535")
+	}
+	if user == "" {
+		user = "root"
+	}
+	if shellMetaRegex.MatchString(user) {
+		return nil, errors.New("user contains invalid characters")
+	}
+	if keyPath != "" && shellMetaRegex.MatchString(keyPath) {
+		return nil, errors.New("keyPath contains invalid characters")
+	}
 
 	return &Server{
 		Name:    name,

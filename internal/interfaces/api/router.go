@@ -2,17 +2,17 @@ package api
 
 import (
 	"embed"
+	"github.com/riverisagame/godeploy/internal/application"
 	"io/fs"
 	"net/http"
-	"github.com/riverisagame/godeploy/internal/application"
 	"strings"
 )
 
 func NewRouter(
-	projectSvc *application.ProjectService, 
-	serverSvc *application.ServerService, 
-	deploySvc *application.DeployService, 
-	deployEngine *application.DeployEngine, 
+	projectSvc *application.ProjectService,
+	serverSvc *application.ServerService,
+	deploySvc *application.DeployService,
+	deployEngine *application.DeployEngine,
 	authSvc *application.AuthService,
 	staticFS embed.FS,
 	jwtSecret string,
@@ -100,7 +100,7 @@ func NewRouter(
 
 	recoveryMiddleware := NewRecoveryMiddleware()
 	loggingMiddleware := NewLoggingMiddleware()
-	
+
 	var handler http.Handler = mux
 	handler = CORS(handler)
 	handler = loggingMiddleware.Wrap(handler)

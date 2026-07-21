@@ -17,16 +17,16 @@ type ProjectModel struct {
 }
 
 type EnvironmentModel struct {
-	ID         uint   `gorm:"primaryKey"`
-	ProjectID  uint   `gorm:"uniqueIndex:idx_project_env_name;index"`
-	Name       string `gorm:"uniqueIndex:idx_project_env_name"`
-	Branch       string
-	DeployType   string
-	BuildCommand string
-	PreDeploy    string
-	PostDeploy   string
-	SharedDirs   string
-	SharedFiles  string
+	ID            uint   `gorm:"primaryKey"`
+	ProjectID     uint   `gorm:"uniqueIndex:idx_project_env_name;index"`
+	Name          string `gorm:"uniqueIndex:idx_project_env_name"`
+	Branch        string
+	DeployType    string
+	BuildCommand  string
+	PreDeploy     string
+	PostDeploy    string
+	SharedDirs    string
+	SharedFiles   string
 	ServerIDs     string // JSON 序列化的 []uint
 	DeployPath    string
 	EnvVars       string // JSON 序列化的 []domain.EnvVar

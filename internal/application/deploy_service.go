@@ -77,7 +77,7 @@ func (s *DeployService) GetEnvironmentDiff(projectID uint, envName string) ([]do
 	}
 
 	// 查找最后一次成功的部署
-	deps, err := s.repo.FindByEnvID(env.ID) 
+	deps, err := s.repo.FindByEnvID(env.ID)
 	if err != nil {
 		return nil, err
 	}
