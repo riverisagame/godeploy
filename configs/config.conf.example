@@ -1,0 +1,25 @@
+# godeploy 标准化配置文件示例 (大厂规范)
+# 拷贝此文件为 config.conf 并根据环境进行修改
+
+[server]
+# 服务监听端口
+port = 8080
+# 运行环境 (development / production)
+mode = production
+
+[database]
+# SQLite 数据文件路径 (Docker/K8s 环境请挂载为外部 Volume)
+# 强烈建议存放在独立的数据目录，如 /var/lib/godeploy/godeploy.db
+path = /var/lib/godeploy/godeploy.db
+
+[security]
+# JWT 签名密钥 (务必修改，建议使用 32 位及以上的随机字符串)
+jwt_secret = change_this_to_a_secure_random_string_in_production
+# 令牌过期时间 (小时)
+jwt_expiration_hours = 24
+
+[logging]
+# 日志级别 (debug / info / warn / error)
+level = info
+# 日志输出格式 (json / text)
+format = json

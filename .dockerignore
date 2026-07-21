@@ -1,0 +1,12 @@
+.git/
+.github/
+docs/
+deploy/
+configs/
+scripts/
+tests/
+*.md
+.gitignore
+.dockerignore
+build/
+bin/

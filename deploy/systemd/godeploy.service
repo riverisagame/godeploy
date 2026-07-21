@@ -1,0 +1,36 @@
+[Unit]
+Description=GoDeploy Service
+After=network.target
+
+[Service]
+Type=simple
+User=godeploy
+Group=godeploy
+WorkingDirectory=/var/lib/godeploy
+# 核心启动命令，强制绑定配置文件
+ExecStart=/usr/local/bin/godeploy -config /etc/godeploy/config.conf
+Restart=on-failure
+RestartSec=5s
+
+# ==========================================
+# 大厂沙盒级防御配置 (Systemd Hardening)
+# ==========================================
+# 防止进程获取新权限 (例如 SUID)
+NoNewPrivileges=yes
+# 锁定整个文件系统为只读
+ProtectSystem=strict
+# 仅对运行需要的数据和日志目录开放读写权限
+ReadWritePaths=/var/lib/godeploy /var/log/godeploy
+# 为进程分配私有的 /tmp 目录
+PrivateTmp=yes
+# 禁止进程读取用户主目录
+ProtectHome=yes
+# 保护内核控制组空间
+ProtectControlGroups=yes
+# 保护内核模块
+ProtectKernelModules=yes
+# 限制可创建的进程数 (防 Fork 炸弹)
+TasksMax=100
+
+[Install]
+WantedBy=multi-user.target
