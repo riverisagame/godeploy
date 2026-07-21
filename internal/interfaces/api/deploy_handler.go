@@ -65,6 +65,12 @@ func (h *DeployHandler) StartDeploy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	role, _ := r.Context().Value(ContextKeyRole).(string)
+	if env.Name == "prod" && role != "admin" {
+		http.Error(w, "Forbidden: Only admins can deploy to prod", http.StatusForbidden)
+		return
+	}
+
 	userID, _ := r.Context().Value(ContextKeyUserID).(float64)
 	deployment, err := h.svc.TriggerDeploy(env.ID, uint(userID), req.CommitHash)
 	if err != nil {
@@ -194,6 +200,26 @@ func (h *DeployHandler) Rollback(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	RespondJSON(w, deployment)
+}
+
+func (h *DeployHandler) Cancel(w http.ResponseWriter, r *http.Request) {
+	parts := strings.Split(r.URL.Path, "/")
+	if len(parts) < 4 {
+		http.Error(w, "invalid path", http.StatusBadRequest)
+		return
+	}
+	deployIDStr := parts[3]
+	deployID, err := strconv.ParseUint(deployIDStr, 10, 32)
+	if err != nil {
+		http.Error(w, "invalid deployment ID", http.StatusBadRequest)
+		return
+	}
+
+	h.engine.CancelDeploy(uint(deployID))
+	
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	RespondJSON(w, map[string]string{"message": "Deployment cancellation requested"})
 }
 
 func (h *DeployHandler) ListDeployments(w http.ResponseWriter, r *http.Request) {

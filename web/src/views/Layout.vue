@@ -19,7 +19,9 @@
         <div class="header-right">
           <el-dropdown>
             <span class="el-dropdown-link cursor-pointer">
-              Admin <el-icon><arrow-down /></el-icon>
+              {{ username }}
+              <el-tag v-if="userRole" size="small" :type="userRole === 'admin' ? 'danger' : 'info'" effect="dark" style="margin-left: 8px; margin-right: 4px;">{{ userRole === 'admin' ? '管理员' : '开发者' }}</el-tag>
+              <el-icon><arrow-down /></el-icon>
             </span>
             <template #dropdown>
               <el-dropdown-menu>
@@ -38,13 +40,25 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Menu, Platform, ArrowDown } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
+import { getUserInfo } from '../utils/auth'
 
 const route = useRoute()
 const router = useRouter()
+
+const username = ref('User')
+const userRole = ref('')
+
+onMounted(() => {
+  const user = getUserInfo()
+  if (user) {
+    username.value = user.username
+    userRole.value = user.role
+  }
+})
 
 const activeMenu = computed(() => {
   const path = route.path

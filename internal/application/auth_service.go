@@ -26,6 +26,26 @@ func HashPassword(password string) (string, error) {
 	return string(bytes), err
 }
 
+func (s *AuthService) InitAdminUser(username, password string) error {
+	user, err := s.repo.FindByUsername(username)
+	if err != nil {
+		return err
+	}
+	if user == nil {
+		hash, err := HashPassword(password)
+		if err != nil {
+			return err
+		}
+		admin := &domain.User{
+			Username:     username,
+			PasswordHash: hash,
+			Role:         "admin",
+		}
+		return s.repo.Save(admin)
+	}
+	return nil
+}
+
 func (s *AuthService) Login(username, password string) (string, error) {
 	user, err := s.repo.FindByUsername(username)
 	if err != nil || user == nil {
@@ -40,6 +60,7 @@ func (s *AuthService) Login(username, password string) (string, error) {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"user_id":  user.ID,
 		"username": user.Username,
+		"role":     user.Role,
 		"exp":      time.Now().Add(24 * time.Hour).Unix(),
 	})
 

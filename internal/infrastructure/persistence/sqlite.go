@@ -8,11 +8,12 @@ import (
 
 // Persistence Models (Infrastructure Layer only)
 type ProjectModel struct {
-	ID           uint   `gorm:"primaryKey"`
-	Name         string `gorm:"uniqueIndex"`
-	RepoURL      string
-	KeepReleases int
-	Environments []EnvironmentModel `gorm:"foreignKey:ProjectID;constraint:OnDelete:CASCADE;"`
+	ID            uint   `gorm:"primaryKey"`
+	Name          string `gorm:"uniqueIndex"`
+	RepoURL       string
+	KeepReleases  int
+	WebhookSecret string
+	Environments  []EnvironmentModel `gorm:"foreignKey:ProjectID;constraint:OnDelete:CASCADE;"`
 }
 
 type EnvironmentModel struct {
@@ -26,9 +27,10 @@ type EnvironmentModel struct {
 	PostDeploy   string
 	SharedDirs   string
 	SharedFiles  string
-	ServerIDs    string // JSON 序列化的 []uint
-	DeployPath   string
-	EnvVars      string // JSON 序列化的 []domain.EnvVar
+	ServerIDs     string // JSON 序列化的 []uint
+	DeployPath    string
+	EnvVars       string // JSON 序列化的 []domain.EnvVar
+	NotifyWebhook string
 }
 
 type SqliteProjectRepository struct {
@@ -43,11 +45,12 @@ func NewSqliteProjectRepository(db *gorm.DB) *SqliteProjectRepository {
 
 func toDomainProject(pm *ProjectModel) *domain.Project {
 	p := &domain.Project{
-		ID:           pm.ID,
-		Name:         pm.Name,
-		RepoURL:      pm.RepoURL,
-		KeepReleases: pm.KeepReleases,
-		Environments: make([]*domain.Environment, 0),
+		ID:            pm.ID,
+		Name:          pm.Name,
+		RepoURL:       pm.RepoURL,
+		KeepReleases:  pm.KeepReleases,
+		WebhookSecret: pm.WebhookSecret,
+		Environments:  make([]*domain.Environment, 0),
 	}
 	for _, em := range pm.Environments {
 		var serverIDs []uint
@@ -65,18 +68,19 @@ func toDomainProject(pm *ProjectModel) *domain.Project {
 			envVars = make([]domain.EnvVar, 0)
 		}
 		p.Environments = append(p.Environments, &domain.Environment{
-			ID:          em.ID,
-			Name:        em.Name,
-			Branch:      em.Branch,
-			DeployType:  em.DeployType,
-			BuildCommand: em.BuildCommand,
-			PreDeploy:   em.PreDeploy,
-			PostDeploy:  em.PostDeploy,
-			SharedDirs:  em.SharedDirs,
-			SharedFiles: em.SharedFiles,
-			ServerIDs:   serverIDs,
-			DeployPath:  em.DeployPath,
-			EnvVars:     envVars,
+			ID:            em.ID,
+			Name:          em.Name,
+			Branch:        em.Branch,
+			DeployType:    em.DeployType,
+			BuildCommand:  em.BuildCommand,
+			PreDeploy:     em.PreDeploy,
+			PostDeploy:    em.PostDeploy,
+			SharedDirs:    em.SharedDirs,
+			SharedFiles:   em.SharedFiles,
+			ServerIDs:     serverIDs,
+			DeployPath:    em.DeployPath,
+			EnvVars:       envVars,
+			NotifyWebhook: em.NotifyWebhook,
 		})
 	}
 	return p
@@ -84,28 +88,30 @@ func toDomainProject(pm *ProjectModel) *domain.Project {
 
 func toProjectModel(p *domain.Project) *ProjectModel {
 	pm := &ProjectModel{
-		ID:           p.ID,
-		Name:         p.Name,
-		RepoURL:      p.RepoURL,
-		KeepReleases: p.KeepReleases,
-		Environments: make([]EnvironmentModel, 0),
+		ID:            p.ID,
+		Name:          p.Name,
+		RepoURL:       p.RepoURL,
+		KeepReleases:  p.KeepReleases,
+		WebhookSecret: p.WebhookSecret,
+		Environments:  make([]EnvironmentModel, 0),
 	}
 	for _, env := range p.Environments {
 		srvJSON, _ := json.Marshal(env.ServerIDs)
 		envVarsJSON, _ := json.Marshal(env.EnvVars)
 		pm.Environments = append(pm.Environments, EnvironmentModel{
-			ID:           env.ID,
-			Name:         env.Name,
-			Branch:       env.Branch,
-			DeployType:   env.DeployType,
-			BuildCommand: env.BuildCommand,
-			PreDeploy:    env.PreDeploy,
-			PostDeploy:   env.PostDeploy,
-			SharedDirs:   env.SharedDirs,
-			SharedFiles:  env.SharedFiles,
-			ServerIDs:    string(srvJSON),
-			DeployPath:   env.DeployPath,
-			EnvVars:      string(envVarsJSON),
+			ID:            env.ID,
+			Name:          env.Name,
+			Branch:        env.Branch,
+			DeployType:    env.DeployType,
+			BuildCommand:  env.BuildCommand,
+			PreDeploy:     env.PreDeploy,
+			PostDeploy:    env.PostDeploy,
+			SharedDirs:    env.SharedDirs,
+			SharedFiles:   env.SharedFiles,
+			ServerIDs:     string(srvJSON),
+			DeployPath:    env.DeployPath,
+			EnvVars:       string(envVarsJSON),
+			NotifyWebhook: env.NotifyWebhook,
 		})
 	}
 	return pm

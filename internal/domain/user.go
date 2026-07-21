@@ -4,6 +4,7 @@ type User struct {
 	ID           uint
 	Username     string
 	PasswordHash string
+	Role         string // "admin" or "developer"
 }
 
 type UserRepository interface {

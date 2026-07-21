@@ -18,26 +18,28 @@ type CommitInfo struct {
 }
 
 type Environment struct {
-	ID          uint     `json:"id"`
-	Name        string   `json:"name"`
-	Branch      string   `json:"branch"`
-	DeployType  string   `json:"deploy_type"`
-	BuildCommand string  `json:"build_command"`
-	PreDeploy   string   `json:"pre_deploy"`
-	PostDeploy  string   `json:"post_deploy"`
-	SharedDirs  string   `json:"shared_dirs"`
-	SharedFiles string   `json:"shared_files"`
-	ServerIDs   []uint   `json:"server_ids"`
-	DeployPath  string   `json:"deploy_path"`
-	EnvVars     []EnvVar `json:"env_vars"`
+	ID            uint     `json:"id"`
+	Name          string   `json:"name"`
+	Branch        string   `json:"branch"`
+	DeployType    string   `json:"deploy_type"`
+	BuildCommand  string   `json:"build_command"`
+	PreDeploy     string   `json:"pre_deploy"`
+	PostDeploy    string   `json:"post_deploy"`
+	SharedDirs    string   `json:"shared_dirs"`
+	SharedFiles   string   `json:"shared_files"`
+	ServerIDs     []uint   `json:"server_ids"`
+	DeployPath    string   `json:"deploy_path"`
+	EnvVars       []EnvVar `json:"env_vars"`
+	NotifyWebhook string   `json:"notify_webhook"` // 部署完成后的通知 URL
 }
 
 type Project struct {
-	ID           uint           `json:"id"`
-	Name         string         `json:"name"`
-	RepoURL      string         `json:"repo_url"`
-	KeepReleases int            `json:"keep_releases"`
-	Environments []*Environment `json:"environments"`
+	ID            uint           `json:"id"`
+	Name          string         `json:"name"`
+	RepoURL       string         `json:"repo_url"`
+	KeepReleases  int            `json:"keep_releases"`
+	WebhookSecret string         `json:"webhook_secret"` // GitHub/GitLab push 签名验证密钥
+	Environments  []*Environment `json:"environments"`
 }
 
 func NewProject(name, repoURL string) (*Project, error) {

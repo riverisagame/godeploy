@@ -8,12 +8,12 @@ func TestNewDeployment(t *testing.T) {
 		t.Errorf("Expected environment ID error, got %v", err)
 	}
 	
-	_, err = NewDeployment(1, 0, "hash123")
-	if err == nil || err.Error() != "user ID must be > 0" {
-		t.Errorf("Expected user ID error, got %v", err)
+	d, err := NewDeployment(1, 0, "hash123")
+	if err != nil {
+		t.Fatalf("Expected no error for user ID 0 (webhook), got %v", err)
 	}
 	
-	d, err := NewDeployment(1, 1, "hash123")
+	d, err = NewDeployment(1, 1, "hash123")
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
 	}

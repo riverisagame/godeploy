@@ -12,8 +12,10 @@ type SSHClient interface {
 
 // GitClient 本地 Git 操作接口
 type GitClient interface {
-	// CloneOrPull 拉取或更新代码到本地 workspace，返回 workspace 路径
-	CloneOrPull(repoURL, branch, projectName string, logChan chan<- string) (workspacePath string, err error)
+	// CloneForDeploy prepares a deployment workspace using a git bare repo and worktree.
+	CloneForDeploy(repoURL, branch, projectName string, deployID uint, logChan chan<- string) (workspacePath string, err error)
+	// CleanupDeploy removes the temporary worktree after deployment finishes.
+	CleanupDeploy(projectName string, deployID uint, deployPath string) error
 	// FetchAndGetCommits 拉取最新代码并获取增量提交记录
 	FetchAndGetCommits(repoURL, branch, projectName, fromCommit string) ([]domain.CommitInfo, error)
 }

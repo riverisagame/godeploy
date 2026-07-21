@@ -35,6 +35,7 @@ export interface Environment {
   shared_files: string
   server_ids: number[]
   deploy_path: string
+  notify_webhook?: string
   env_vars: EnvVar[]
   deployments?: Deployment[] // Frontend logic adds this
 }
@@ -43,6 +44,7 @@ export interface Project {
   id: number
   name: string
   repo_url: string
+  webhook_secret?: string
   keep_releases: number
   environments: Environment[]
 }

@@ -22,12 +22,17 @@
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="180" fixed="right">
+      <el-table-column label="操作" width="220" fixed="right">
         <template #default="scope">
           <el-button link type="primary" size="small" @click="viewLog(scope.row.id)">日志</el-button>
-          <el-button link type="danger" size="small" v-if="scope.row.status === 'success'" @click="rollback(scope.row)">
+          <el-button link type="danger" size="small" v-if="admin && scope.row.status === 'success'" @click="rollback(scope.row)">
             回滚此版本
           </el-button>
+          <el-popconfirm title="确定要取消该部署吗？" @confirm="handleCancel(scope.row.id)" v-if="scope.row.status === 'pending' || scope.row.status === 'running'" placement="left">
+            <template #reference>
+              <el-button link type="danger" size="small">取消</el-button>
+            </template>
+          </el-popconfirm>
         </template>
       </el-table-column>
     </el-table>
@@ -39,8 +44,11 @@ import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
 import { api } from '../api'
+import { computed } from 'vue'
+import { isAdmin } from '../utils/auth'
 
 const router = useRouter()
+const admin = computed(() => isAdmin())
 
 import type { Environment, Deployment } from '../types'
 
@@ -79,6 +87,16 @@ const rollback = async (row: Deployment) => {
     if (e !== 'cancel') {
       ElMessage.error(e.response?.data || '回滚失败')
     }
+  }
+}
+
+const handleCancel = async (deployId: number) => {
+  try {
+    await api.cancelDeployment(deployId)
+    ElMessage.success('取消请求已发送')
+    fetchHistory()
+  } catch (e: any) {
+    ElMessage.error(e.response?.data || '取消失败')
   }
 }
 </script>

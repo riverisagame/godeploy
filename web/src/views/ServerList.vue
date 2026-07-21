@@ -5,7 +5,7 @@
         <h2>服务器管理</h2>
         <p class="subtitle">管理所有可用于部署的物理机和虚拟机资源</p>
       </div>
-      <el-button type="primary" @click="dialogVisible = true" size="large">新建服务器</el-button>
+      <el-button v-if="admin" type="primary" @click="dialogVisible = true" size="large">新建服务器</el-button>
     </div>
 
     <el-card class="dense-table-card" shadow="never">
@@ -34,7 +34,7 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="160" align="center">
+        <el-table-column v-if="admin" label="操作" width="160" align="center">
           <template #default="scope">
             <el-button size="small" type="primary" text bg @click="openEdit(scope.row)">编辑</el-button>
             <el-button size="small" type="danger" text bg @click="handleDelete(scope.row)">删除</el-button>
@@ -85,11 +85,14 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { api } from '../api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Monitor } from '@element-plus/icons-vue'
 import type { Server } from '../types'
+import { isAdmin } from '../utils/auth'
+
+const admin = computed(() => isAdmin())
 
 const servers = ref<Server[]>([])
 const dialogVisible = ref(false)

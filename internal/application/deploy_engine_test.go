@@ -23,12 +23,16 @@ func (m *mockSSHClient) SyncFiles(server *domain.Server, localPath, remotePath, 
 
 type mockGitClient struct{}
 
-func (m *mockGitClient) CloneOrPull(repoURL, branch, projectName string, logChan chan<- string) (string, error) {
+func (m *mockGitClient) CloneForDeploy(r, b, p string, id uint, l chan<- string) (string, error) {
 	return "/tmp/mock", nil
 }
 
-func (m *mockGitClient) FetchAndGetCommits(repoURL, branch, projectName, fromCommit string) ([]domain.CommitInfo, error) {
-	return nil, nil
+func (m *mockGitClient) CleanupDeploy(p string, id uint, dp string) error {
+	return nil
+}
+
+func (m *mockGitClient) FetchAndGetCommits(r, b, p, f string) ([]domain.CommitInfo, error) {
+	return []domain.CommitInfo{{Hash: "123"}}, nil
 }
 
 func TestDeployEngine_DependencyInversion(t *testing.T) {

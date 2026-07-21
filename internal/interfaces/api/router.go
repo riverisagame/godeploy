@@ -33,28 +33,38 @@ func NewRouter(
 		return authMiddleware.Wrap(h).ServeHTTP
 	}
 
+	adminProtect := func(h http.HandlerFunc) http.HandlerFunc {
+		return authMiddleware.Wrap(RequireAdmin(h)).ServeHTTP
+	}
+
 	// Project Routes
 	mux.HandleFunc("GET /api/projects", protect(projectHandler.List))
-	mux.HandleFunc("POST /api/projects", protect(projectHandler.Create))
-	mux.HandleFunc("PUT /api/projects/{id}", protect(projectHandler.Update))
-	mux.HandleFunc("DELETE /api/projects/{id}", protect(projectHandler.Delete))
+	mux.HandleFunc("POST /api/projects", adminProtect(projectHandler.Create))
+	mux.HandleFunc("PUT /api/projects/{id}", adminProtect(projectHandler.Update))
+	mux.HandleFunc("DELETE /api/projects/{id}", adminProtect(projectHandler.Delete))
 
 	// Environment Routes
-	mux.HandleFunc("POST /api/projects/{id}/environments", protect(projectHandler.AddEnvironment))
-	mux.HandleFunc("PUT /api/projects/{id}/environments/{name}", protect(projectHandler.UpdateEnvironment))
+	mux.HandleFunc("POST /api/projects/{id}/environments", adminProtect(projectHandler.AddEnvironment))
+	mux.HandleFunc("PUT /api/projects/{id}/environments/{name}", adminProtect(projectHandler.UpdateEnvironment))
 	mux.HandleFunc("GET /api/projects/{id}/environments/{name}/diff", protect(deployHandler.GetDiff))
 
 	// Server Routes
 	mux.HandleFunc("GET /api/servers", protect(serverHandler.List))
-	mux.HandleFunc("POST /api/servers", protect(serverHandler.Create))
-	mux.HandleFunc("PUT /api/servers/{id}", protect(serverHandler.Update))
-	mux.HandleFunc("DELETE /api/servers/{id}", protect(serverHandler.Delete))
+	mux.HandleFunc("POST /api/servers", adminProtect(serverHandler.Create))
+	mux.HandleFunc("PUT /api/servers/{id}", adminProtect(serverHandler.Update))
+	mux.HandleFunc("DELETE /api/servers/{id}", adminProtect(serverHandler.Delete))
+
+	webhookHandler := NewWebhookHandler(projectSvc, deploySvc, deployEngine)
 
 	// Deploy & Log Stream Route
 	mux.HandleFunc("GET /api/deployments", protect(deployHandler.ListDeployments))
 	mux.HandleFunc("POST /api/deployments", protect(deployHandler.StartDeploy))
-	mux.HandleFunc("POST /api/deployments/{id}/rollback", protect(deployHandler.Rollback))
+	mux.HandleFunc("POST /api/deployments/{id}/rollback", adminProtect(deployHandler.Rollback)) // 仅管理员可回滚
+	mux.HandleFunc("POST /api/deployments/{id}/cancel", protect(deployHandler.Cancel))
 	mux.HandleFunc("GET /api/deployments/{id}/logs", protect(deployHandler.StreamLogs))
+
+	// Webhooks
+	mux.HandleFunc("POST /api/webhook/github", webhookHandler.HandleGitHubPush)
 
 	// Setup embedded static files
 	distFS, err := fs.Sub(staticFS, "web/dist")

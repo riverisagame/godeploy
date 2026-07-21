@@ -28,43 +28,65 @@ func (c *Client) getLock(projectName string) *sync.Mutex {
 	return lock.(*sync.Mutex)
 }
 
-// CloneOrPull 拉取或更新代码到本地 workspace
-// 如果 workspace 已存在则 fetch + reset，否则 clone
-func (c *Client) CloneOrPull(repoURL, branch, projectName string, logChan chan<- string) (string, error) {
+// CloneForDeploy prepares a deployment workspace using a git bare repo and worktree.
+// This allows O(1) concurrent checkouts and caches the repo locally.
+// @Ref: docs/sps/plans/20260721_v2.5_refactoring_ir.md | @Date: 2026-07-21
+func (c *Client) CloneForDeploy(repoURL, branch, projectName string, deployID uint, logChan chan<- string) (string, error) {
 	lock := c.getLock(projectName)
 	lock.Lock()
 	defer lock.Unlock()
 
-	workspacePath := filepath.Join(c.workspaceBase, projectName)
+	bareRepoPath := filepath.Join(c.workspaceBase, projectName+".git")
+	deployPath := filepath.Join(c.workspaceBase, fmt.Sprintf("%s_deploy_%d", projectName, deployID))
 
-	if _, err := os.Stat(filepath.Join(workspacePath, ".git")); err == nil {
-		// 目录已存在，执行 fetch + checkout + reset
-		logChan <- fmt.Sprintf("[Git] Fetching %s (branch: %s)...\n", projectName, branch)
-		if err := c.runGit(workspacePath, logChan, "fetch", "origin", branch); err != nil {
-			return "", fmt.Errorf("git fetch failed: %w", err)
+	// 1. Ensure bare repo exists
+	if _, err := os.Stat(bareRepoPath); err != nil {
+		logChan <- fmt.Sprintf("[Git] Initialize bare repo %s...\n", repoURL)
+		if err := os.MkdirAll(bareRepoPath, 0755); err != nil {
+			return "", fmt.Errorf("mkdir bare repo failed: %w", err)
 		}
-		if err := c.runGit(workspacePath, logChan, "checkout", branch); err != nil {
-			return "", fmt.Errorf("git checkout failed: %w", err)
+		if err := c.runGit("", logChan, "clone", "--bare", repoURL, bareRepoPath); err != nil {
+			return "", fmt.Errorf("git bare clone failed: %w", err)
 		}
-		if err := c.runGit(workspacePath, logChan, "reset", "--hard", "origin/"+branch); err != nil {
-			return "", fmt.Errorf("git reset failed: %w", err)
-		}
-		logChan <- fmt.Sprintf("[Git] Updated %s to latest origin/%s\n", projectName, branch)
 	} else {
-		// 目录不存在，执行 clone
-		logChan <- fmt.Sprintf("[Git] Cloning %s (branch: %s)...\n", repoURL, branch)
-		if err := os.MkdirAll(c.workspaceBase, 0755); err != nil {
-			return "", fmt.Errorf("mkdir workspace failed: %w", err)
+		logChan <- fmt.Sprintf("[Git] Fetching latest from origin...\n")
+		// 必须指定 refspec 来强制更新本地的引用，或者直接 fetch 默认
+		if err := c.runGit(bareRepoPath, logChan, "fetch", "origin", "+refs/heads/*:refs/heads/*", "--prune"); err != nil {
+			logChan <- fmt.Sprintf("[Git] Fetch failed, ignoring... %v\n", err)
 		}
-		// @Ref: docs/sps/plans/20260720_pre_deploy_diff_ir.md | @Date: 2026-07-20
-		// 移除 --depth=1 以拉取全量历史
-		if err := c.runGit("", logChan, "clone", "-b", branch, repoURL, workspacePath); err != nil {
-			return "", fmt.Errorf("git clone failed: %w", err)
-		}
-		logChan <- fmt.Sprintf("[Git] Cloned %s successfully\n", projectName)
 	}
 
-	return workspacePath, nil
+	// 2. Remove existing worktree if left over
+	if _, err := os.Stat(deployPath); err == nil {
+		os.RemoveAll(deployPath)
+		c.runGit(bareRepoPath, logChan, "worktree", "prune")
+	}
+
+	// 3. Create worktree detached at target branch
+	logChan <- fmt.Sprintf("[Git] Checking out branch %s to worktree...\n", branch)
+	if err := c.runGit(bareRepoPath, logChan, "worktree", "add", "--detach", deployPath, branch); err != nil {
+		return "", fmt.Errorf("git worktree add failed: %w", err)
+	}
+
+	return deployPath, nil
+}
+
+// CleanupDeploy removes the temporary worktree after deployment finishes.
+func (c *Client) CleanupDeploy(projectName string, deployID uint, deployPath string) error {
+	bareRepoPath := filepath.Join(c.workspaceBase, projectName+".git")
+	
+	// Remove directory
+	if err := os.RemoveAll(deployPath); err != nil {
+		return err
+	}
+	
+	// Prune worktree
+	// We run it silently since logChan might be closed
+	cmd := exec.Command("git", "worktree", "prune")
+	cmd.Dir = bareRepoPath
+	_ = cmd.Run()
+	
+	return nil
 }
 
 // runGit 执行 git 命令并流式输出到 logChan

@@ -45,9 +45,17 @@ func (m *mockDeployProjectRepo) FindAll() ([]*domain.Project, error) { return ni
 func (m *mockDeployProjectRepo) Delete(id uint) error { return nil }
 
 type mockGitClient struct{}
-func (m *mockGitClient) CloneOrPull(r, b, p string, l chan<- string) (string, error) { return "", nil }
-func (m *mockGitClient) FetchAndGetCommits(r, b, p, f string) ([]domain.CommitInfo, error) {
-	return []domain.CommitInfo{{Hash: "123"}}, nil
+
+func (m *mockGitClient) CloneForDeploy(repoURL, branch, projectName string, deployID uint, logChan chan<- string) (string, error) {
+	return "/tmp/mock", nil
+}
+
+func (m *mockGitClient) CleanupDeploy(projectName string, deployID uint, deployPath string) error {
+	return nil
+}
+
+func (m *mockGitClient) FetchAndGetCommits(repoURL, branch, projectName, fromCommit string) ([]domain.CommitInfo, error) {
+	return []domain.CommitInfo{{Hash: "123", Message: "test"}}, nil
 }
 
 func TestDeployService_TriggerDeploy(t *testing.T) {

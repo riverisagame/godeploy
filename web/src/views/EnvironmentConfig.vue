@@ -5,7 +5,7 @@
         <h2>环境配置</h2>
         <p class="subtitle">管理项目 (ID: {{ projectId }}) 的部署环境、分支及 Hook 脚本</p>
       </div>
-      <el-button type="primary" @click="dialogVisible = true" size="large">新建环境</el-button>
+      <el-button v-if="admin" type="primary" @click="dialogVisible = true" size="large">新建环境</el-button>
     </div>
 
     <!-- Environments List -->
@@ -113,6 +113,9 @@
                 <el-form-item label="部署目标路径 (Deploy Path)">
                   <el-input v-model="env.deploy_path" placeholder="例如: /var/www/html/myapp"></el-input>
                 </el-form-item>
+                <el-form-item label="Notify Webhook (可选)" style="margin-top: 16px;">
+                  <el-input v-model="env.notify_webhook" placeholder="部署状态通知的 Webhook 地址，如飞书/钉钉"></el-input>
+                </el-form-item>
               </el-col>
               <el-col :span="12">
                 <el-form-item label="关联服务器">
@@ -132,10 +135,14 @@
             <EnvVarEditor v-model="env.env_vars" />
 
             <div class="action-footer">
-              <el-button type="primary" @click="saveConfig(env)">保存配置</el-button>
-              <el-button type="success" @click="startDeploy(env)">
-                <el-icon class="el-icon--left"><Promotion /></el-icon> 立即部署
-              </el-button>
+              <el-button v-if="admin" type="primary" @click="saveConfig(env)">保存配置</el-button>
+              <el-tooltip :content="env.name === 'prod' && !admin ? '仅管理员可以发布到生产环境' : ''" placement="top" :disabled="admin || env.name !== 'prod'">
+                <div>
+                  <el-button type="success" @click="startDeploy(env)" :disabled="!admin && env.name === 'prod'" style="margin-left: 12px;">
+                    <el-icon class="el-icon--left"><Promotion /></el-icon> 立即部署
+                  </el-button>
+                </div>
+              </el-tooltip>
             </div>
 
             <!-- @Ref: docs/sps/plans/20260720_system_health_ir.md | @Date: 2026-07-20 -->
@@ -219,17 +226,19 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api } from '../api'
 import { ElMessage } from 'element-plus'
 import { VideoPlay, VideoPause, Promotion, CopyDocument, Loading, User, Clock, Cpu, Folder, Document } from '@element-plus/icons-vue'
 import EnvVarEditor from '../components/EnvVarEditor.vue'
 import DeployHistory from '../components/DeployHistory.vue'
+import { isAdmin } from '../utils/auth'
 
 const route = useRoute()
 const router = useRouter()
 const projectId = route.params.id
+const admin = computed(() => isAdmin())
 
 import type { Environment, CommitInfo, Project, Server } from '../types'
 
@@ -308,6 +317,7 @@ const saveConfig = async (env: Environment) => {
       shared_dirs: env.shared_dirs,
       shared_files: env.shared_files,
       deploy_path: env.deploy_path,
+      notify_webhook: env.notify_webhook,
       server_ids: env.server_ids,
       env_vars: env.env_vars || []
     })

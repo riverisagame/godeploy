@@ -3,9 +3,59 @@ package git_test
 import (
 	"os"
 	"os/exec"
+	"path/filepath"
 	"pdeploy/internal/infrastructure/git"
 	"testing"
 )
+
+func TestClient_CloneOrPullWorktree(t *testing.T) {
+	workspace := t.TempDir()
+	client := git.NewClient(workspace)
+
+	// Create remote mock repo
+	remoteRepo := t.TempDir()
+	createMockRepo(t, remoteRepo)
+
+	projectName := "test-worktree"
+	deployID1 := uint(100)
+	deployID2 := uint(101)
+	
+	logChan1 := make(chan string, 100)
+	logChan2 := make(chan string, 100)
+
+	// Deploy 1
+	path1, err := client.CloneForDeploy(remoteRepo, "main", projectName, deployID1, logChan1)
+	if err != nil {
+		t.Fatalf("CloneForDeploy 1 failed: %v", err)
+	}
+	
+	if _, err := os.Stat(filepath.Join(path1, "file1.txt")); os.IsNotExist(err) {
+		t.Errorf("expected file1.txt in worktree 1")
+	}
+
+	// Deploy 2 (concurrent simulation)
+	path2, err := client.CloneForDeploy(remoteRepo, "main", projectName, deployID2, logChan2)
+	if err != nil {
+		t.Fatalf("CloneForDeploy 2 failed: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(path2, "file2.txt")); os.IsNotExist(err) {
+		t.Errorf("expected file2.txt in worktree 2")
+	}
+	
+	if path1 == path2 {
+		t.Errorf("expected different paths for concurrent deploys, got %s", path1)
+	}
+
+	// Cleanup
+	err = client.CleanupDeploy(projectName, deployID1, path1)
+	if err != nil {
+		t.Errorf("CleanupDeploy 1 failed: %v", err)
+	}
+	if _, err := os.Stat(path1); !os.IsNotExist(err) {
+		t.Errorf("expected path1 to be removed")
+	}
+}
 
 func TestClient_FetchAndGetCommits(t *testing.T) {
 	// 这是一个集成测试，需要真实的或模拟的 git 环境

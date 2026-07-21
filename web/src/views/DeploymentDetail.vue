@@ -5,9 +5,18 @@
         <h2>部署详情</h2>
         <p class="subtitle">实时查看部署日志及状态 (ID: {{ route.params.id }})</p>
       </div>
-      <el-button @click="$router.back()" size="large">
-        <el-icon class="el-icon--left"><Back /></el-icon> 返回
-      </el-button>
+      <div>
+        <el-popconfirm title="确定要取消该部署吗？" @confirm="handleCancel" v-if="!isFinished" placement="bottom">
+          <template #reference>
+            <el-button type="danger" size="large" :loading="canceling">
+              <el-icon class="el-icon--left"><Close /></el-icon> 取消部署
+            </el-button>
+          </template>
+        </el-popconfirm>
+        <el-button @click="$router.back()" size="large" style="margin-left: 12px;">
+          <el-icon class="el-icon--left"><Back /></el-icon> 返回
+        </el-button>
+      </div>
     </div>
 
     <!-- Terminal Window -->
@@ -36,12 +45,16 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
-import { Back } from '@element-plus/icons-vue'
+import { Back, Close } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
+import { api } from '../api'
 
 const route = useRoute()
 const logs = ref<string[]>([])
 const logContainer = ref<HTMLElement | null>(null)
 let eventSource: EventSource | null = null
+const isFinished = ref(false)
+const canceling = ref(false)
 
 const scrollToBottom = () => {
   nextTick(() => {
@@ -68,6 +81,7 @@ const connectSSE = () => {
     if (event.data === '[EOF]') {
       if (eventSource) eventSource.close()
       logs.value.push('>>> Connection closed. Deployment finished.')
+      isFinished.value = true
       scrollToBottom()
       return
     }
@@ -79,7 +93,23 @@ const connectSSE = () => {
     console.error('SSE Error:', error)
     logs.value.push('>>> Error connecting to log stream.')
     if (eventSource) eventSource.close()
+    isFinished.value = true
     scrollToBottom()
+  }
+}
+
+const handleCancel = async () => {
+  const deployID = Number(route.params.id)
+  if (!deployID) return
+  
+  canceling.value = true
+  try {
+    await api.cancelDeployment(deployID)
+    ElMessage.success('取消部署请求已发送')
+  } catch (e: any) {
+    ElMessage.error(e.response?.data || '取消失败')
+  } finally {
+    canceling.value = false
   }
 }
 

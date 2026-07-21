@@ -5,7 +5,7 @@
         <h2>项目管理</h2>
         <p class="subtitle">管理所有需要发布的项目及环境配置</p>
       </div>
-      <el-button type="primary" @click="dialogVisible = true" size="large">新建项目</el-button>
+      <el-button v-if="admin" type="primary" @click="dialogVisible = true" size="large">新建项目</el-button>
     </div>
 
     <el-row :gutter="24" class="project-grid" v-if="projects.length > 0">
@@ -27,12 +27,14 @@
           </div>
           <div class="card-footer" style="justify-content: space-between;">
             <div>
-              <el-button type="primary" link @click.stop="openEdit(prj)">编辑</el-button>
-              <el-popconfirm title="确定删除此项目及其所有环境配置吗？" @confirm="handleDelete(prj.id)" placement="top">
-                <template #reference>
-                  <el-button type="danger" link @click.stop>删除</el-button>
-                </template>
-              </el-popconfirm>
+              <template v-if="admin">
+                <el-button type="primary" link @click.stop="openEdit(prj)">编辑</el-button>
+                <el-popconfirm title="确定删除此项目及其所有环境配置吗？" @confirm="handleDelete(prj.id)" placement="top">
+                  <template #reference>
+                    <el-button type="danger" link @click.stop>删除</el-button>
+                  </template>
+                </el-popconfirm>
+              </template>
             </div>
             <el-button type="primary" text bg size="small" @click.stop="viewEnvs(prj)">配置环境 <el-icon class="el-icon--right"><ArrowRight /></el-icon></el-button>
           </div>
@@ -51,6 +53,9 @@
         <el-form-item label="Git 仓库">
           <el-input v-model="form.repo_url" placeholder="例如: git@github.com:..." size="large"></el-input>
         </el-form-item>
+        <el-form-item label="Webhook 密钥 (可选)">
+          <el-input v-model="form.webhook_secret" placeholder="用于验证 GitHub/GitLab 请求签名" size="large" show-password></el-input>
+        </el-form-item>
       </el-form>
       <template #footer>
         <div class="dialog-footer">
@@ -63,14 +68,16 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { api } from '../api'
 import { ElMessage } from 'element-plus'
 import { useRouter } from 'vue-router'
 import { Link, CopyDocument, ArrowRight } from '@element-plus/icons-vue'
 import type { Project } from '../types'
+import { isAdmin } from '../utils/auth'
 
 const router = useRouter()
+const admin = computed(() => isAdmin())
 
 const projects = ref<Project[]>([])
 const dialogVisible = ref(false)
@@ -79,7 +86,8 @@ const editId = ref<number | null>(null)
 const saving = ref(false)
 const form = ref({
   name: '',
-  repo_url: ''
+  repo_url: '',
+  webhook_secret: ''
 })
 
 const fetchProjects = async () => {
@@ -94,13 +102,13 @@ const fetchProjects = async () => {
 const resetForm = () => {
   isEdit.value = false
   editId.value = null
-  form.value = { name: '', repo_url: '' }
+  form.value = { name: '', repo_url: '', webhook_secret: '' }
 }
 
 const openEdit = (prj: Project) => {
   isEdit.value = true
   editId.value = prj.id
-  form.value = { name: prj.name, repo_url: prj.repo_url }
+  form.value = { name: prj.name, repo_url: prj.repo_url, webhook_secret: prj.webhook_secret || '' }
   dialogVisible.value = true
 }
 

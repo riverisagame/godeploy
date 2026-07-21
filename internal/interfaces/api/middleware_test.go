@@ -1,6 +1,7 @@
 package api_test
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"pdeploy/internal/interfaces/api"
@@ -77,5 +78,41 @@ func TestRecoveryMiddleware(t *testing.T) {
 	expectedBody := `{"code":500,"error":"Internal Server Error"}`
 	if w.Body.String() != expectedBody+"\n" {
 		t.Errorf("expected body %s, got %s", expectedBody, w.Body.String())
+	}
+}
+
+func TestRequireAdminMiddleware(t *testing.T) {
+	handler := api.RequireAdmin(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	
+	// Case 1: No Role in Context (Not Admin)
+	req1 := httptest.NewRequest("GET", "/admin", nil)
+	w1 := httptest.NewRecorder()
+	handler.ServeHTTP(w1, req1)
+	if w1.Code != http.StatusForbidden {
+		t.Errorf("expected 403 Forbidden, got %d", w1.Code)
+	}
+
+	// Case 2: Role is developer (Not Admin)
+	req2 := httptest.NewRequest("GET", "/admin", nil)
+	ctx2 := req2.Context()
+	ctx2 = context.WithValue(ctx2, api.ContextKeyRole, "developer")
+	req2 = req2.WithContext(ctx2)
+	w2 := httptest.NewRecorder()
+	handler.ServeHTTP(w2, req2)
+	if w2.Code != http.StatusForbidden {
+		t.Errorf("expected 403 Forbidden for developer, got %d", w2.Code)
+	}
+
+	// Case 3: Role is admin
+	req3 := httptest.NewRequest("GET", "/admin", nil)
+	ctx3 := req3.Context()
+	ctx3 = context.WithValue(ctx3, api.ContextKeyRole, "admin")
+	req3 = req3.WithContext(ctx3)
+	w3 := httptest.NewRecorder()
+	handler.ServeHTTP(w3, req3)
+	if w3.Code != http.StatusOK {
+		t.Errorf("expected 200 OK for admin, got %d", w3.Code)
 	}
 }

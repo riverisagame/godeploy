@@ -12,6 +12,7 @@ import (
 
 type contextKey string
 const ContextKeyUserID contextKey = "user_id"
+const ContextKeyRole contextKey = "role"
 
 type AuthMiddleware struct {
 	secret []byte
@@ -73,12 +74,27 @@ func (m *AuthMiddleware) Wrap(next http.Handler) http.Handler {
 		if claims, ok := token.Claims.(jwt.MapClaims); ok {
 			if userIDFloat, ok := claims["user_id"].(float64); ok {
 				ctx := context.WithValue(r.Context(), ContextKeyUserID, userIDFloat)
+				if roleStr, ok := claims["role"].(string); ok {
+					ctx = context.WithValue(ctx, ContextKeyRole, roleStr)
+				}
 				next.ServeHTTP(w, r.WithContext(ctx))
 				return
 			}
 		}
 
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+	})
+}
+
+// RequireAdmin middleware ensures the user has admin role
+func RequireAdmin(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		role, ok := r.Context().Value(ContextKeyRole).(string)
+		if !ok || role != "admin" {
+			RespondError(w, http.StatusForbidden, "Forbidden: Admin access required")
+			return
+		}
+		next.ServeHTTP(w, r)
 	})
 }
 

@@ -9,6 +9,7 @@ type UserModel struct {
 	ID           uint   `gorm:"primaryKey"`
 	Username     string `gorm:"uniqueIndex"`
 	PasswordHash string
+	Role         string
 }
 
 type SqliteUserRepository struct {
@@ -24,6 +25,7 @@ func (r *SqliteUserRepository) Save(u *domain.User) error {
 		ID:           u.ID,
 		Username:     u.Username,
 		PasswordHash: u.PasswordHash,
+		Role:         u.Role,
 	}
 	err := r.db.Save(m).Error
 	if err == nil {
@@ -45,5 +47,6 @@ func (r *SqliteUserRepository) FindByUsername(username string) (*domain.User, er
 		ID:           m.ID,
 		Username:     m.Username,
 		PasswordHash: m.PasswordHash,
+		Role:         m.Role,
 	}, nil
 }

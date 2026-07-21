@@ -69,6 +69,7 @@ func TestDeployHandler_StartDeploy_UsesEnvID(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	
 	ctx := context.WithValue(req.Context(), api.ContextKeyUserID, float64(123))
+	ctx = context.WithValue(ctx, api.ContextKeyRole, "admin")
 	req = req.WithContext(ctx)
 
 	w := httptest.NewRecorder()

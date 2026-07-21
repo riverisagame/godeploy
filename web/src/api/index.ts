@@ -21,6 +21,7 @@ export const api = {
   getDeployments: (envId: number) => request.get<Deployment[]>(`/deployments`, { params: { env_id: envId } }),
   createDeployment: (projectId: string | number, envName: string, branch: string) => request.post<Deployment>('/deployments', { project_id: typeof projectId === 'string' ? parseInt(projectId) : projectId, env_name: envName, branch }),
   rollbackDeployment: (deployId: number, projectId: string | number, envName: string, targetRelease: string) => request.post<Deployment>(`/deployments/${deployId}/rollback`, { project_id: typeof projectId === 'string' ? parseInt(projectId) : projectId, env_name: envName, target_release: targetRelease }),
+  cancelDeployment: (deployId: number) => request.post<any>(`/deployments/${deployId}/cancel`),
   
   // Servers
   getServers: () => request.get<Server[]>('/servers'),

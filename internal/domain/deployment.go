@@ -21,9 +21,6 @@ func NewDeployment(envID, userID uint, commitHash string) (*Deployment, error) {
 	if envID <= 0 {
 		return nil, errors.New("environment ID must be > 0")
 	}
-	if userID <= 0 {
-		return nil, errors.New("user ID must be > 0")
-	}
 
 	return &Deployment{
 		EnvID:      envID,
