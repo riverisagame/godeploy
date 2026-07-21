@@ -37,8 +37,8 @@ func TestLoadConfig_EnvVars(t *testing.T) {
 	defer func() {
 		_ = os.Unsetenv("PORT")
 		_ = os.Unsetenv("DB_PATH")
-		os.Unsetenv("WORKSPACE_DIR")
-		os.Unsetenv("JWT_SECRET")
+		_ = os.Unsetenv("WORKSPACE_DIR")
+		_ = os.Unsetenv("JWT_SECRET")
 	}()
 
 	cfg := config.Load()
