@@ -1,0 +1,15 @@
+run:
+  timeout: 5m
+  # Workaround for: "the Go language version used to build golangci-lint is lower than the targeted Go version"
+  # This tells golangci-lint to use Go 1.24 parsing semantics, bypassing the 1.26.5 requirement in go.mod
+  go: '1.24'
+
+linters:
+  disable-all: true
+  enable:
+    - errcheck
+    - gosimple
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
