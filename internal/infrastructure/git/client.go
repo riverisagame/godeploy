@@ -49,7 +49,7 @@ func (c *Client) CloneForDeploy(repoURL, branch, projectName string, deployID ui
 			return "", fmt.Errorf("git bare clone failed: %w", err)
 		}
 	} else {
-		logChan <- fmt.Sprintf("[Git] Fetching latest from origin...\n")
+		logChan <- "[Git] Fetching latest from origin...\n"
 		// 必须指定 refspec 来强制更新本地的引用，或者直接 fetch 默认
 		if err := c.runGit(bareRepoPath, logChan, "fetch", "origin", "+refs/heads/*:refs/heads/*", "--prune"); err != nil {
 			logChan <- fmt.Sprintf("[Git] Fetch failed, ignoring... %v\n", err)
@@ -58,8 +58,8 @@ func (c *Client) CloneForDeploy(repoURL, branch, projectName string, deployID ui
 
 	// 2. Remove existing worktree if left over
 	if _, err := os.Stat(deployPath); err == nil {
-		os.RemoveAll(deployPath)
-		c.runGit(bareRepoPath, logChan, "worktree", "prune")
+		_ = os.RemoveAll(deployPath)
+		_ = c.runGit(bareRepoPath, logChan, "worktree", "prune")
 	}
 
 	// 3. Create worktree detached at target branch

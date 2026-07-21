@@ -29,7 +29,7 @@ func TestDatabaseCascadeDeletes(t *testing.T) {
 	// Create a project with environment
 	projectRepo := persistence.NewSqliteProjectRepository(db)
 	p, _ := domain.NewProject("CascadeProj", "url")
-	p.AddEnvironment("prod", "main", "symlink")
+	_ = p.AddEnvironment("prod", "main", "symlink")
 	err = projectRepo.Save(p)
 	if err != nil {
 		t.Fatalf("Failed to save project: %v", err)

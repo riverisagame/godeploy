@@ -8,9 +8,9 @@ import (
 
 func TestLoadConfig_Defaults(t *testing.T) {
 	// Unset environment variables to test defaults
-	os.Unsetenv("PORT")
-	os.Unsetenv("DB_PATH")
-	os.Unsetenv("WORKSPACE_DIR")
+	_ = os.Unsetenv("PORT")
+	_ = os.Unsetenv("DB_PATH")
+	_ = os.Unsetenv("WORKSPACE_DIR")
 	os.Unsetenv("JWT_SECRET")
 
 	cfg := config.Load()
@@ -30,9 +30,9 @@ func TestLoadConfig_Defaults(t *testing.T) {
 }
 
 func TestLoadConfig_EnvVars(t *testing.T) {
-	os.Setenv("PORT", "9090")
-	os.Setenv("DB_PATH", "custom.db")
-	os.Setenv("WORKSPACE_DIR", "/tmp/ws")
+	_ = os.Setenv("PORT", "9090")
+	_ = os.Setenv("DB_PATH", "custom.db")
+	_ = os.Setenv("WORKSPACE_DIR", "/tmp/ws")
 	os.Setenv("JWT_SECRET", "super-secret")
 	defer func() {
 		os.Unsetenv("PORT")

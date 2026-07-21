@@ -115,7 +115,7 @@ func (h *DeployHandler) StreamLogs(w http.ResponseWriter, r *http.Request) {
 		select {
 		case msg, ok := <-logChan:
 			if !ok {
-				fmt.Fprintf(w, "data: [EOF]\n\n")
+				_, _ = fmt.Fprintf(w, "data: [EOF]\n\n")
 				flusher.Flush()
 				return
 			}
@@ -125,7 +125,7 @@ func (h *DeployHandler) StreamLogs(w http.ResponseWriter, r *http.Request) {
 			// Let's replace newlines if needed, or send line by line.
 			lines := strings.Split(strings.TrimRight(msg, "\n"), "\n")
 			for _, line := range lines {
-				fmt.Fprintf(w, "data: %s\n\n", line)
+				_, _ = fmt.Fprintf(w, "data: %s\n\n", line)
 			}
 			flusher.Flush()
 			

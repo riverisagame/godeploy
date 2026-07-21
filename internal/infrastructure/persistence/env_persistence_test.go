@@ -15,7 +15,7 @@ func TestEnvironmentServerIDsPersistence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	db.AutoMigrate(&ProjectModel{}, &EnvironmentModel{})
+	_ = db.AutoMigrate(&ProjectModel{}, &EnvironmentModel{})
 
 	repo := NewSqliteProjectRepository(db)
 
@@ -74,7 +74,7 @@ func TestEnvironmentEmptyServerIDs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	db.AutoMigrate(&ProjectModel{}, &EnvironmentModel{})
+	_ = db.AutoMigrate(&ProjectModel{}, &EnvironmentModel{})
 
 	repo := NewSqliteProjectRepository(db)
 

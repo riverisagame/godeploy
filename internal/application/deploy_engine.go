@@ -187,13 +187,13 @@ func (e *DeployEngine) Rollback(deployment *domain.Deployment, env *domain.Envir
 						e.broadcastLog(deployment.ID, msg)
 					}
 				}()
-				e.sshClient.RunCommand(srv, fmt.Sprintf("cd %s && %s", currentLink, safeCmd), hookLogChan)
+				_ = e.sshClient.RunCommand(srv, fmt.Sprintf("cd %s && %s", currentLink, safeCmd), hookLogChan)
 				close(hookLogChan)
 			}
 			e.broadcastLog(deployment.ID, fmt.Sprintf(">>> 服务器 %s 回滚成功。\n", srv.Name))
 		}
 
-		e.deploySvc.CompleteDeploy(deployment.ID, true, e.GetLogHistory(deployment.ID), "")
+		_ = e.deploySvc.CompleteDeploy(deployment.ID, true, e.GetLogHistory(deployment.ID), "")
 		e.broadcastLog(deployment.ID, ">>> 回滚完成。\n")
 		time.Sleep(300 * time.Millisecond)
 	}()
@@ -218,14 +218,14 @@ func (e *DeployEngine) runDeploySteps(ctx context.Context, deployment *domain.De
 	workspacePath, err := e.gitClient.CloneForDeploy(project.RepoURL, env.Branch, project.Name, deployment.ID, logChan)
 	if err != nil {
 		e.broadcastLog(deployment.ID, fmt.Sprintf("ERROR: Git clone failed: %v\n", err))
-		e.deploySvc.CompleteDeploy(deployment.ID, false, e.GetLogHistory(deployment.ID), "")
+		_ = e.deploySvc.CompleteDeploy(deployment.ID, false, e.GetLogHistory(deployment.ID), "")
 		return
 	}
-	defer e.gitClient.CleanupDeploy(project.Name, deployment.ID, workspacePath)
+	defer func() { _ = e.gitClient.CleanupDeploy(project.Name, deployment.ID, workspacePath) }()
 
 	if ctx.Err() != nil {
 		e.broadcastLog(deployment.ID, "ERROR: Deploy cancelled before sync.\n")
-		e.deploySvc.CompleteDeploy(deployment.ID, false, e.GetLogHistory(deployment.ID), "")
+		_ = e.deploySvc.CompleteDeploy(deployment.ID, false, e.GetLogHistory(deployment.ID), "")
 		return
 	}
 
@@ -255,7 +255,7 @@ func (e *DeployEngine) runDeploySteps(ctx context.Context, deployment *domain.De
 				currentLink := fmt.Sprintf("%s/current", env.DeployPath)
 				tmpLink := fmt.Sprintf("%s/current_tmp_%d", env.DeployPath, time.Now().UnixNano())
 				symlinkCmd := fmt.Sprintf("ln -sfn %s %s && mv -Tf %s %s", remoteReleasePath, tmpLink, tmpLink, currentLink)
-				e.sshClient.RunCommand(srv, symlinkCmd, logChan)
+				_ = e.sshClient.RunCommand(srv, symlinkCmd, logChan)
 			}
 		} else {
 			e.broadcastLog(deployment.ID, "Test mode: skipping ssh sync.\n")

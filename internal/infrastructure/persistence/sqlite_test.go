@@ -27,7 +27,7 @@ func TestSqliteProjectRepository_SaveAndFind(t *testing.T) {
 	repo := NewSqliteProjectRepository(db)
 
 	p, _ := domain.NewProject("test-infra", "git@git")
-	p.AddEnvironment("prod", "main", "symlink")
+	_ = p.AddEnvironment("prod", "main", "symlink")
 	
 	err := repo.Save(p)
 	if err != nil {

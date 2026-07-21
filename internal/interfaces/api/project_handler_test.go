@@ -47,7 +47,7 @@ func TestProjectHandler_Create(t *testing.T) {
 	}
 
 	var resp map[string]interface{}
-	json.Unmarshal(rr.Body.Bytes(), &resp)
+	_ = json.Unmarshal(rr.Body.Bytes(), &resp)
 
 	if resp["name"] != "test-api" {
 		t.Errorf("Expected project name 'test-api', got %v", resp["name"])

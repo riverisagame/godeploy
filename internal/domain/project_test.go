@@ -45,7 +45,7 @@ func TestAddEnvironment(t *testing.T) {
 func TestEnvironmentEnvVars(t *testing.T) {
 	// @Ref: docs/sps/plans/20260720_env_vars_ir.md | @Date: 2026-07-20
 	p, _ := NewProject("demo", "git@github.com:demo/demo.git")
-	p.AddEnvironment("prod", "main", "symlink")
+	_ = p.AddEnvironment("prod", "main", "symlink")
 	env := p.Environments[0]
 	
 	if len(env.EnvVars) != 0 {

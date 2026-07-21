@@ -85,14 +85,14 @@ func (c *Client) RunCommand(server *domain.Server, cmd string, logChan chan<- st
 		logChan <- fmt.Sprintf("[SSH] Failed to dial %s: %v\n", addr, err)
 		return err
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	session, err := client.NewSession()
 	if err != nil {
 		logChan <- fmt.Sprintf("[SSH] Failed to create session: %v\n", err)
 		return err
 	}
-	defer session.Close()
+	defer func() { _ = session.Close() }()
 
 	stdout, err := session.StdoutPipe()
 	if err != nil {

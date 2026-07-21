@@ -11,7 +11,7 @@ import (
 
 func TestServerService_CreateServer(t *testing.T) {
 	db, _ := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	db.AutoMigrate(&persistence.ServerModel{}, &persistence.ProjectModel{}, &persistence.EnvironmentModel{})
+	_ = db.AutoMigrate(&persistence.ServerModel{}, &persistence.ProjectModel{}, &persistence.EnvironmentModel{})
 	repo := persistence.NewSqliteServerRepository(db)
 	projectRepo := persistence.NewSqliteProjectRepository(db)
 	svc := application.NewServerService(repo, projectRepo)
@@ -76,7 +76,7 @@ func TestServerService_DeleteServer(t *testing.T) {
 	// Fetch it to update
 	prjs, _ := projectSvc.GetProjects()
 	prjs[0].Environments[0].ServerIDs = []uint{created.ID}
-	projectRepo.Save(prjs[0])
+	_ = projectRepo.Save(prjs[0])
 
 	var em persistence.EnvironmentModel
 	db.First(&em)

@@ -56,7 +56,7 @@ func (s *ServerService) DeleteServer(id uint) error {
 				}
 			}
 			if changed {
-				s.projectRepo.Save(prj)
+				_ = s.projectRepo.Save(prj)
 			}
 		}
 	}

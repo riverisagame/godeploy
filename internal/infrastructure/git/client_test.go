@@ -99,12 +99,12 @@ func createMockRepo(t *testing.T, path string) {
 	runCmd(t, path, "git", "config", "user.email", "test@test.com")
 	
 	// Create first commit
-	os.WriteFile(path+"/file1.txt", []byte("hello"), 0644)
+	_ = os.WriteFile(path+"/file1.txt", []byte("hello"), 0644)
 	runCmd(t, path, "git", "add", ".")
 	runCmd(t, path, "git", "commit", "-m", "first commit")
 	
 	// Create second commit
-	os.WriteFile(path+"/file2.txt", []byte("world"), 0644)
+	_ = os.WriteFile(path+"/file2.txt", []byte("world"), 0644)
 	runCmd(t, path, "git", "add", ".")
 	runCmd(t, path, "git", "commit", "-m", "second commit")
 }

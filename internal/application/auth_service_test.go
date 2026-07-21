@@ -27,7 +27,7 @@ func TestAuthService_Login(t *testing.T) {
 	// Pre-create user "admin" with password "admin123"
 	// Hash logic would normally happen on creation, but we test the service wrapper
 	hashedPwd, _ := application.HashPassword("admin123")
-	repo.Save(&domain.User{
+	_ = repo.Save(&domain.User{
 		Username:     "admin",
 		PasswordHash: hashedPwd,
 	})

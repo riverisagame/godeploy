@@ -25,5 +25,5 @@ func (h *WebhookHandler) HandleGitHubPush(w http.ResponseWriter, r *http.Request
 	// TODO: Full webhook implementation with signature verification and auto-deploy
 	// This is a stub to satisfy the router definition.
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{"status": "ok", "message": "webhook received"})
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok", "message": "webhook received"})
 }

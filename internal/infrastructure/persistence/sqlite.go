@@ -55,14 +55,14 @@ func toDomainProject(pm *ProjectModel) *domain.Project {
 	for _, em := range pm.Environments {
 		var serverIDs []uint
 		if em.ServerIDs != "" {
-			json.Unmarshal([]byte(em.ServerIDs), &serverIDs)
+			_ = json.Unmarshal([]byte(em.ServerIDs), &serverIDs)
 		}
 		if serverIDs == nil {
 			serverIDs = make([]uint, 0)
 		}
 		var envVars []domain.EnvVar
 		if em.EnvVars != "" {
-			json.Unmarshal([]byte(em.EnvVars), &envVars)
+			_ = json.Unmarshal([]byte(em.EnvVars), &envVars)
 		}
 		if envVars == nil {
 			envVars = make([]domain.EnvVar, 0)
