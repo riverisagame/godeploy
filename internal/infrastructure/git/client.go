@@ -36,24 +36,12 @@ func (c *Client) CloneForDeploy(repoURL, branch, projectName string, deployID ui
 	lock.Lock()
 	defer lock.Unlock()
 
-	bareRepoPath := filepath.Join(c.workspaceBase, projectName+".git")
+	bareRepoPath := filepath.Join(c.workspaceBase, projectName+"_bare")
 	deployPath := filepath.Join(c.workspaceBase, fmt.Sprintf("%s_deploy_%d", projectName, deployID))
 
 	// 1. Ensure bare repo exists
-	if _, err := os.Stat(bareRepoPath); err != nil {
-		logChan <- fmt.Sprintf("[Git] Initialize bare repo %s...\n", repoURL)
-		if err := os.MkdirAll(bareRepoPath, 0755); err != nil {
-			return "", fmt.Errorf("mkdir bare repo failed: %w", err)
-		}
-		if err := c.runGit("", logChan, "clone", "--bare", repoURL, bareRepoPath); err != nil {
-			return "", fmt.Errorf("git bare clone failed: %w", err)
-		}
-	} else {
-		logChan <- "[Git] Fetching latest from origin...\n"
-		// 必须指定 refspec 来强制更新本地的引用，或者直接 fetch 默认
-		if err := c.runGit(bareRepoPath, logChan, "fetch", "origin", "+refs/heads/*:refs/heads/*", "--prune"); err != nil {
-			logChan <- fmt.Sprintf("[Git] Fetch failed, ignoring... %v\n", err)
-		}
+	if err := c.ensureBareRepo(repoURL, bareRepoPath, logChan); err != nil {
+		return "", err
 	}
 
 	// 2. Remove existing worktree if left over
@@ -117,41 +105,33 @@ func (c *Client) runGit(dir string, logChan chan<- string, args ...string) error
 }
 
 // FetchAndGetCommits 拉取最新代码并获取从 fromCommit 到最新分支的提交记录
-// @Ref: docs/sps/plans/20260720_pre_deploy_diff_ir.md | @Date: 2026-07-20
+// @Ref: docs/sps/plans/20260721_git_bare_unification_ir.md | @Date: 2026-07-21
 func (c *Client) FetchAndGetCommits(repoURL, branch, projectName, fromCommit string) ([]domain.CommitInfo, error) {
 	lock := c.getLock(projectName)
 	lock.Lock()
 	defer lock.Unlock()
 
-	workspacePath := filepath.Join(c.workspaceBase, projectName)
+	bareRepoPath := filepath.Join(c.workspaceBase, projectName+"_bare")
 
-	if _, err := os.Stat(filepath.Join(workspacePath, ".git")); err != nil {
-		// 不存在则克隆
-		if err := os.MkdirAll(c.workspaceBase, 0755); err != nil {
-			return nil, fmt.Errorf("mkdir workspace failed: %w", err)
-		}
-		cmd := exec.Command("git", "clone", "-b", branch, repoURL, workspacePath)
-		if err := cmd.Run(); err != nil {
-			return nil, fmt.Errorf("git clone failed: %w", err)
-		}
-	} else {
-		// 存在则 fetch
-		cmd := exec.Command("git", "fetch", "-q", "origin", branch)
-		cmd.Dir = workspacePath
-		if err := cmd.Run(); err != nil {
-			return nil, fmt.Errorf("git fetch failed: %w", err)
-		}
+	// Since FetchAndGetCommits doesn't have a log channel, we use a dummy one
+	logChan := make(chan string, 100)
+	go func() {
+		for range logChan {}
+	}()
+
+	if err := c.ensureBareRepo(repoURL, bareRepoPath, logChan); err != nil {
+		return nil, fmt.Errorf("ensure bare repo failed: %w", err)
 	}
 
 	var args []string
 	if fromCommit != "" {
-		args = []string{"log", fmt.Sprintf("%s..origin/%s", fromCommit, branch), "--pretty=format:%H|%s|%an|%ad", "--date=iso"}
+		args = []string{"log", fmt.Sprintf("%s..%s", fromCommit, branch), "--pretty=format:%H|%s|%an|%ad", "--date=iso"}
 	} else {
-		args = []string{"log", fmt.Sprintf("origin/%s", branch), "-n", "10", "--pretty=format:%H|%s|%an|%ad", "--date=iso"}
+		args = []string{"log", branch, "-n", "10", "--pretty=format:%H|%s|%an|%ad", "--date=iso"}
 	}
 
 	cmd := exec.Command("git", args...)
-	cmd.Dir = workspacePath
+	cmd.Dir = bareRepoPath
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return nil, fmt.Errorf("git log failed: %w, %s", err, string(out))
@@ -175,4 +155,22 @@ func (c *Client) FetchAndGetCommits(repoURL, branch, projectName, fromCommit str
 	}
 
 	return commits, nil
+}
+
+func (c *Client) ensureBareRepo(repoURL, bareRepoPath string, logChan chan<- string) error {
+	if _, err := os.Stat(bareRepoPath); err != nil {
+		logChan <- fmt.Sprintf("[Git] Initialize bare repo %s...\n", repoURL)
+		if err := os.MkdirAll(bareRepoPath, 0755); err != nil {
+			return fmt.Errorf("mkdir bare repo failed: %w", err)
+		}
+		if err := c.runGit("", logChan, "clone", "--bare", repoURL, bareRepoPath); err != nil {
+			return fmt.Errorf("git bare clone failed: %w", err)
+		}
+	} else {
+		logChan <- "[Git] Fetching latest from origin...\n"
+		if err := c.runGit(bareRepoPath, logChan, "fetch", "origin", "+refs/heads/*:refs/heads/*", "--prune"); err != nil {
+			logChan <- fmt.Sprintf("[Git] Fetch failed, ignoring... %v\n", err)
+		}
+	}
+	return nil
 }

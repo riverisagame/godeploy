@@ -33,6 +33,10 @@ func (s *ProjectService) GetProjects() ([]*domain.Project, error) {
 	return s.repo.FindAll()
 }
 
+func (s *ProjectService) GetProjectByID(id uint) (*domain.Project, error) {
+	return s.repo.FindByID(id)
+}
+
 func (s *ProjectService) AddEnvironment(projectID uint, name, branch, deployType string) (*domain.Project, error) {
 	project, err := s.repo.FindByID(projectID)
 	if err != nil {

@@ -1,12 +1,16 @@
 package application
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
-	"github.com/riverisagame/godeploy/internal/domain"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/riverisagame/godeploy/internal/domain"
 )
 
 type DeployEngine struct {
@@ -205,6 +209,26 @@ func (e *DeployEngine) runDeploySteps(ctx context.Context, deployment *domain.De
 	lock.Lock()
 	defer lock.Unlock()
 
+	// @Ref: docs/sps/plans/20260721_v2.5_refactoring_ir.md Task 3.4 | @Date: 2026-07-22
+	success := false
+	defer func() {
+		if env.NotifyWebhook != "" {
+			go func(url string, isSuccess bool) {
+				status := "failed"
+				if isSuccess {
+					status = "success"
+				}
+				payload, _ := json.Marshal(map[string]interface{}{
+					"project": project.Name,
+					"env":     env.Name,
+					"status":  status,
+				})
+				client := &http.Client{Timeout: 5 * time.Second}
+				_, _ = client.Post(url, "application/json", bytes.NewBuffer(payload))
+			}(env.NotifyWebhook, success)
+		}
+	}()
+
 	e.broadcastLog(deployment.ID, fmt.Sprintf(">>> 开始部署任务 #%d (环境: %s)...\n", deployment.ID, env.Name))
 
 	logChan := make(chan string, 100)
@@ -282,4 +306,5 @@ func (e *DeployEngine) runDeploySteps(ctx context.Context, deployment *domain.De
 		_ = e.deploySvc.CompleteDeploy(deployment.ID, true, e.GetLogHistory(deployment.ID), releaseName)
 	}
 	e.broadcastLog(deployment.ID, ">>> 部署成功完成。\n")
+	success = true
 }

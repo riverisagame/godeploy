@@ -1,8 +1,16 @@
 package api
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
+	"strconv"
+	"strings"
 
 	"github.com/riverisagame/godeploy/internal/application"
 )
@@ -21,9 +29,70 @@ func NewWebhookHandler(projectSvc *application.ProjectService, deploySvc *applic
 	}
 }
 
+// @Ref: docs/sps/plans/20260721_v2.5_refactoring_ir.md Task 3.3 | @Date: 2026-07-22
 func (h *WebhookHandler) HandleGitHubPush(w http.ResponseWriter, r *http.Request) {
-	// TODO: Full webhook implementation with signature verification and auto-deploy
-	// This is a stub to satisfy the router definition.
+	projectIDStr := r.PathValue("project_id")
+	projectID, err := strconv.ParseUint(projectIDStr, 10, 32)
+	if err != nil {
+		RespondError(w, http.StatusBadRequest, "invalid project id")
+		return
+	}
+
+	project, err := h.projectSvc.GetProjectByID(uint(projectID))
+	if err != nil || project == nil {
+		w.WriteHeader(http.StatusNotFound)
+		RespondJSON(w, map[string]string{"error": "project not found"})
+		return
+	}
+
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		RespondError(w, http.StatusInternalServerError, "failed to read body")
+		return
+	}
+	defer r.Body.Close()
+
+	signature := r.Header.Get("X-Hub-Signature-256")
+	if signature == "" || project.WebhookSecret == "" {
+		RespondError(w, http.StatusForbidden, "missing signature or secret")
+		return
+	}
+
+	mac := hmac.New(sha256.New, []byte(project.WebhookSecret))
+	mac.Write(body)
+	expectedMAC := mac.Sum(nil)
+	expectedSignature := "sha256=" + hex.EncodeToString(expectedMAC)
+
+	if subtle.ConstantTimeCompare([]byte(signature), []byte(expectedSignature)) != 1 {
+		RespondError(w, http.StatusForbidden, "invalid signature")
+		return
+	}
+
+	var payload struct {
+		Ref string `json:"ref"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		RespondError(w, http.StatusBadRequest, "invalid json payload")
+		return
+	}
+
+	branch := strings.TrimPrefix(payload.Ref, "refs/heads/")
+
+	started := 0
+	for _, env := range project.Environments {
+		if env.Branch == branch || (env.Branch == "" && branch == "main") { // default to main if branch not set
+			// Start deploy in background to not block the webhook response
+			deployment, err := h.deploySvc.TriggerDeploy(env.ID, 0, "WEBHOOK_TRIGGER")
+			if err == nil {
+				go h.deployEngine.StartDeploy(deployment, project, env)
+				started++
+			}
+		}
+	}
+
 	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok", "message": "webhook received"})
+	RespondJSON(w, map[string]string{
+		"status":  "ok",
+		"message": fmt.Sprintf("triggered %d environments", started),
+	})
 }

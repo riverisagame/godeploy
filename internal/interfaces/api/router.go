@@ -14,6 +14,7 @@ func NewRouter(
 	deploySvc *application.DeployService,
 	deployEngine *application.DeployEngine,
 	authSvc *application.AuthService,
+	userSvc *application.UserService,
 	staticFS embed.FS,
 	jwtSecret string,
 ) http.Handler {
@@ -23,6 +24,7 @@ func NewRouter(
 	serverHandler := NewServerHandler(serverSvc)
 	deployHandler := NewDeployHandler(deploySvc, deployEngine, projectSvc)
 	authHandler := NewAuthHandler(authSvc)
+	userHandler := NewUserHandler(userSvc)
 	authMiddleware := NewAuthMiddleware(jwtSecret)
 
 	// Public Routes
@@ -42,6 +44,10 @@ func NewRouter(
 	mux.HandleFunc("POST /api/projects", adminProtect(projectHandler.Create))
 	mux.HandleFunc("PUT /api/projects/{id}", adminProtect(projectHandler.Update))
 	mux.HandleFunc("DELETE /api/projects/{id}", adminProtect(projectHandler.Delete))
+
+	// User Routes
+	mux.HandleFunc("GET /api/users", adminProtect(userHandler.List))
+	mux.HandleFunc("POST /api/users", adminProtect(userHandler.Create))
 
 	// Environment Routes
 	mux.HandleFunc("POST /api/projects/{id}/environments", adminProtect(projectHandler.AddEnvironment))
@@ -64,7 +70,7 @@ func NewRouter(
 	mux.HandleFunc("GET /api/deployments/{id}/logs", protect(deployHandler.StreamLogs))
 
 	// Webhooks
-	mux.HandleFunc("POST /api/webhook/github", webhookHandler.HandleGitHubPush)
+	mux.HandleFunc("POST /api/webhook/github/{project_id}", webhookHandler.HandleGitHubPush)
 
 	// Setup embedded static files
 	distFS, err := fs.Sub(staticFS, "web/dist")

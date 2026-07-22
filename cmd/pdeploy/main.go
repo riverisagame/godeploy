@@ -60,6 +60,7 @@ func main() {
 	gitClient := git.NewClient(cfg.WorkspaceDir)
 
 	userRepo := persistence.NewSqliteUserRepository(db)
+	userSvc := application.NewUserService(userRepo)
 	authSvc := application.NewAuthService(userRepo, cfg.JWTSecret)
 
 	// Create default admin user if none exists
@@ -73,7 +74,7 @@ func main() {
 	deployEngine := application.NewDeployEngine(sshClient, gitClient, serverSvc, deploySvc)
 
 	// 3. Initialize Interfaces
-	router := api.NewRouter(projectSvc, serverSvc, deploySvc, deployEngine, authSvc, pdeploy.StaticFS, cfg.JWTSecret)
+	router := api.NewRouter(projectSvc, serverSvc, deploySvc, deployEngine, authSvc, userSvc, pdeploy.StaticFS, cfg.JWTSecret)
 
 	addr := ":" + cfg.Port
 	srv := &http.Server{

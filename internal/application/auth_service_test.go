@@ -20,6 +20,14 @@ func (m *mockUserRepo) FindByUsername(username string) (*domain.User, error) {
 	return m.users[username], nil
 }
 
+func (m *mockUserRepo) FindAll() ([]*domain.User, error) {
+	var list []*domain.User
+	for _, u := range m.users {
+		list = append(list, u)
+	}
+	return list, nil
+}
+
 func TestAuthService_Login(t *testing.T) {
 	repo := &mockUserRepo{users: make(map[string]*domain.User)}
 	svc := application.NewAuthService(repo, "secret-key")

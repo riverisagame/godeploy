@@ -50,3 +50,22 @@ func (r *SqliteUserRepository) FindByUsername(username string) (*domain.User, er
 		Role:         m.Role,
 	}, nil
 }
+
+// @Ref: docs/sps/plans/20260721_v2.5_refactoring_ir.md Task 3.1 | @Date: 2026-07-22
+func (r *SqliteUserRepository) FindAll() ([]*domain.User, error) {
+	var models []UserModel
+	err := r.db.Find(&models).Error
+	if err != nil {
+		return nil, err
+	}
+	var users []*domain.User
+	for _, m := range models {
+		users = append(users, &domain.User{
+			ID:           m.ID,
+			Username:     m.Username,
+			PasswordHash: m.PasswordHash,
+			Role:         m.Role,
+		})
+	}
+	return users, nil
+}

@@ -79,6 +79,20 @@ func TestClient_FetchAndGetCommits(t *testing.T) {
 		t.Errorf("Expected commits, got 0")
 	}
 
+	// [RED STAGE] 验证底层的仓库是不是 bare 仓库
+	barePath := filepath.Join(workspace, projectName+"_bare")
+	if _, err := os.Stat(barePath); os.IsNotExist(err) {
+		t.Fatalf("Expected bare repository path %s to exist, but it does not", barePath)
+	}
+
+	cmd := exec.Command("git", "config", "--get", "core.bare")
+	cmd.Dir = barePath
+	out, err := cmd.Output()
+	if err != nil || string(out[:4]) != "true" {
+		t.Errorf("expected bare repository, got core.bare=%s", string(out))
+	}
+
+
 	// 测试带 fromCommit (获取第二条以后的)
 	// 假设我们取第一个返回的 hash 作为 target，看看能不能获取增量
 	if len(commits) >= 2 {

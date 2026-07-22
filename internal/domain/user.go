@@ -10,4 +10,5 @@ type User struct {
 type UserRepository interface {
 	Save(u *User) error
 	FindByUsername(username string) (*User, error)
+	FindAll() ([]*User, error)
 }
