@@ -5,6 +5,10 @@ export const api = {
   // Auth
   login: (data: any) => request.post('/login', data),
 
+  // Users
+  getUsers: () => request.get('/users'),
+  createUser: (data: any) => request.post('/users', data),
+
   // Projects
   getProjects: () => request.get<Project[]>('/projects'),
   createProject: (data: Partial<Project>) => request.post<Project>('/projects', data),

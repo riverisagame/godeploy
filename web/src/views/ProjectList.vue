@@ -24,6 +24,15 @@
               <el-icon><CopyDocument /></el-icon>
               <span>保留版本数: <strong>{{ prj.keep_releases }}</strong></span>
             </div>
+            <div class="info-row webhook-info" style="align-items: flex-start; margin-top: 4px;">
+              <el-icon style="margin-top: 3px;"><Key /></el-icon>
+              <div class="webhook-details">
+                <div class="truncate webhook-url" :title="`${origin}/api/webhook/github/${prj.id}`">
+                  URL: <strong>{{ origin }}/api/webhook/github/{{ prj.id }}</strong>
+                </div>
+                <div>Secret: <strong>{{ prj.webhook_secret || '未配置' }}</strong></div>
+              </div>
+            </div>
           </div>
           <div class="card-footer" style="justify-content: space-between;">
             <div>
@@ -72,12 +81,13 @@ import { ref, onMounted, computed } from 'vue'
 import { api } from '../api'
 import { ElMessage } from 'element-plus'
 import { useRouter } from 'vue-router'
-import { Link, CopyDocument, ArrowRight } from '@element-plus/icons-vue'
+import { Link, CopyDocument, ArrowRight, Key } from '@element-plus/icons-vue'
 import type { Project } from '../types'
 import { isAdmin } from '../utils/auth'
 
 const router = useRouter()
 const admin = computed(() => isAdmin())
+const origin = computed(() => window.location.origin)
 
 const projects = ref<Project[]>([])
 const dialogVisible = ref(false)
@@ -241,5 +251,16 @@ h2 {
   display: flex;
   justify-content: flex-end;
   border-top: 1px solid rgba(255, 255, 255, 0.03);
+}
+.webhook-details {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: calc(100% - 24px);
+}
+.webhook-url {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--accent-blue);
 }
 </style>

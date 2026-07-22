@@ -7,9 +7,13 @@
           <el-icon><Menu /></el-icon>
           <span>项目管理</span>
         </el-menu-item>
-        <el-menu-item index="/servers" class="cursor-pointer">
+        <el-menu-item index="/servers" class="cursor-pointer" v-if="isAdmin()">
           <el-icon><Platform /></el-icon>
           <span>服务器管理</span>
+        </el-menu-item>
+        <el-menu-item index="/users" class="cursor-pointer" v-if="isAdmin()">
+          <el-icon><User /></el-icon>
+          <span>用户管理</span>
         </el-menu-item>
       </el-menu>
     </el-aside>
@@ -42,9 +46,9 @@
 <script setup lang="ts">
 import { computed, ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Menu, Platform, ArrowDown } from '@element-plus/icons-vue'
+import { Menu, Platform, ArrowDown, User } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
-import { getUserInfo } from '../utils/auth'
+import { getUserInfo, isAdmin } from '../utils/auth'
 
 const route = useRoute()
 const router = useRouter()

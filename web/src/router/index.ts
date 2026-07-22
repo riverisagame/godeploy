@@ -1,5 +1,6 @@
 import { createRouter, createWebHashHistory, type RouteRecordRaw } from 'vue-router'
 import Layout from '../views/Layout.vue'
+import { isAdmin } from '../utils/auth'
 
 const routes: Array<RouteRecordRaw> = [
   {
@@ -26,6 +27,12 @@ const routes: Array<RouteRecordRaw> = [
         path: 'deployments/:id',
         name: 'DeploymentDetail',
         component: () => import('../views/DeploymentDetail.vue')
+      },
+      {
+        path: 'users',
+        name: 'Users',
+        component: () => import('../views/UserList.vue'),
+        meta: { requiresAdmin: true }
       }
     ]
   },
@@ -51,6 +58,8 @@ router.beforeEach((to, _from, next) => {
   if (to.path !== '/login' && !token) {
     next('/login')
   } else if (to.path === '/login' && token) {
+    next('/')
+  } else if (to.meta.requiresAdmin && !isAdmin()) {
     next('/')
   } else {
     next()
