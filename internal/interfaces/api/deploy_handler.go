@@ -11,16 +11,18 @@ import (
 )
 
 type DeployHandler struct {
-	svc    *application.DeployService
-	engine *application.DeployEngine
-	prjSvc *application.ProjectService
+	svc       *application.DeployService
+	engine    *application.DeployEngine
+	prjSvc    *application.ProjectService
+	scheduler *application.DeployScheduler
 }
 
-func NewDeployHandler(svc *application.DeployService, engine *application.DeployEngine, prjSvc *application.ProjectService) *DeployHandler {
+func NewDeployHandler(svc *application.DeployService, engine *application.DeployEngine, prjSvc *application.ProjectService, scheduler *application.DeployScheduler) *DeployHandler {
 	return &DeployHandler{
-		svc:    svc,
-		engine: engine,
-		prjSvc: prjSvc,
+		svc:       svc,
+		engine:    engine,
+		prjSvc:    prjSvc,
+		scheduler: scheduler,
 	}
 }
 
@@ -78,8 +80,8 @@ func (h *DeployHandler) StartDeploy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Start deployment asynchronously in the engine
-	h.engine.StartDeploy(deployment, targetProject, env)
+	// Queue deployment asynchronously in the scheduler
+	h.scheduler.Notify(deployment.ID)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
@@ -195,7 +197,7 @@ func (h *DeployHandler) Rollback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.engine.Rollback(deployment, env, req.TargetRelease)
+	h.scheduler.Notify(deployment.ID)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)

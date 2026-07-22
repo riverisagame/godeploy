@@ -26,6 +26,8 @@ func (m *mockProjectRepo) Delete(id uint) error {
 	return nil
 }
 
+func (m *mockProjectRepo) FindProjectByEnvID(envID uint) (*domain.Project, error) { return nil, nil }
+
 func TestProjectService_CreateProject(t *testing.T) {
 	repo := &mockProjectRepo{projects: make(map[uint]*domain.Project)}
 	svc := NewProjectService(repo)

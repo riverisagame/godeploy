@@ -86,3 +86,7 @@ func (r *SqliteDeploymentRepository) FindByEnvID(envID uint) ([]*domain.Deployme
 	}
 	return res, nil
 }
+
+func (r *SqliteDeploymentRepository) FindByStatus(status string) ([]*domain.Deployment, error) {
+	return nil, nil
+}

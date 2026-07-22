@@ -42,7 +42,9 @@ func (s *UserService) ListUsers() ([]domain.User, error) {
 	// Requires UserRepository.FindAll()
 	var users []domain.User
 	// TODO: We need FindAll method in repo
-	if repoWithFindAll, ok := s.repo.(interface{ FindAll() ([]*domain.User, error) }); ok {
+	if repoWithFindAll, ok := s.repo.(interface {
+		FindAll() ([]*domain.User, error)
+	}); ok {
 		models, err := repoWithFindAll.FindAll()
 		if err != nil {
 			return nil, err

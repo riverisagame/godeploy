@@ -15,6 +15,10 @@
           <el-icon><User /></el-icon>
           <span>用户管理</span>
         </el-menu-item>
+        <el-menu-item index="/audit-logs" class="cursor-pointer" v-if="isAdmin()">
+          <el-icon><Document /></el-icon>
+          <span>审计日志</span>
+        </el-menu-item>
       </el-menu>
     </el-aside>
     
@@ -46,7 +50,7 @@
 <script setup lang="ts">
 import { computed, ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Menu, Platform, ArrowDown, User } from '@element-plus/icons-vue'
+import { Menu, Platform, ArrowDown, User, Document } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { getUserInfo, isAdmin } from '../utils/auth'
 

@@ -5,6 +5,7 @@ type ProjectRepository interface {
 	FindByID(id uint) (*Project, error)
 	FindAll() ([]*Project, error)
 	Delete(id uint) error
+	FindProjectByEnvID(envID uint) (*Project, error)
 }
 
 type EnvironmentRepository interface {
@@ -16,4 +17,5 @@ type DeploymentRepository interface {
 	Save(d *Deployment) error
 	FindByID(id uint) (*Deployment, error)
 	FindByEnvID(envID uint) ([]*Deployment, error)
+	FindByStatus(status string) ([]*Deployment, error)
 }

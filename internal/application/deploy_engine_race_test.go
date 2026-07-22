@@ -9,7 +9,7 @@ import (
 func TestDeployEngine_LogRaceCondition(t *testing.T) {
 	// Task 1.2 RED Test
 	deploySvc := application.NewDeployService(nil, nil, nil)
-	engine := application.NewDeployEngine(nil, nil, nil, deploySvc)
+	engine := application.NewDeployEngine(nil, nil, nil, deploySvc, nil)
 
 	// In the real code, appendLog mutates a local logLines slice in StartDeploy.
 	// Since we can't easily trigger the exact internal StartDeploy without valid git/ssh mocks,

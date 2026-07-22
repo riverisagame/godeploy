@@ -33,6 +33,12 @@ const routes: Array<RouteRecordRaw> = [
         name: 'Users',
         component: () => import('../views/UserList.vue'),
         meta: { requiresAdmin: true }
+      },
+      {
+        path: 'audit-logs',
+        name: 'AuditLogs',
+        component: () => import('../views/AuditLog.vue'),
+        meta: { requiresAdmin: true }
       }
     ]
   },

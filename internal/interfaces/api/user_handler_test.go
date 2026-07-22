@@ -40,9 +40,9 @@ func TestUserHandler_CreateAndList(t *testing.T) {
 
 	req := httptest.NewRequest("GET", "/api/users", nil)
 	rr := httptest.NewRecorder()
-	
+
 	handler.List(rr, req)
-	
+
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200 OK for List, got %d", rr.Code)
 	}
@@ -51,9 +51,9 @@ func TestUserHandler_CreateAndList(t *testing.T) {
 	req = httptest.NewRequest("POST", "/api/users", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
 	rr = httptest.NewRecorder()
-	
+
 	handler.Create(rr, req)
-	
+
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("expected 201 Created for Create, got %d", rr.Code)
 	}

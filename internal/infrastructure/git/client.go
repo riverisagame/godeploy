@@ -116,7 +116,8 @@ func (c *Client) FetchAndGetCommits(repoURL, branch, projectName, fromCommit str
 	// Since FetchAndGetCommits doesn't have a log channel, we use a dummy one
 	logChan := make(chan string, 100)
 	go func() {
-		for range logChan {}
+		for range logChan {
+		}
 	}()
 
 	if err := c.ensureBareRepo(repoURL, bareRepoPath, logChan); err != nil {

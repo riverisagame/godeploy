@@ -19,6 +19,9 @@ func (m *mockDeployRepo) Save(d *domain.Deployment) error {
 	return nil
 }
 
+func (m *mockDeployRepo) FindByProjectID(pid uint) ([]*domain.Deployment, error) { return nil, nil }
+func (m *mockDeployRepo) FindByStatus(status string) ([]*domain.Deployment, error) { return nil, nil }
+
 func (m *mockDeployRepo) FindByID(id uint) (*domain.Deployment, error) {
 	if d, ok := m.deployments[id]; ok {
 		return d, nil
@@ -46,6 +49,7 @@ func (m *mockDeployProjectRepo) FindByID(id uint) (*domain.Project, error) {
 }
 func (m *mockDeployProjectRepo) FindAll() ([]*domain.Project, error) { return nil, nil }
 func (m *mockDeployProjectRepo) Delete(id uint) error                { return nil }
+func (m *mockDeployProjectRepo) FindProjectByEnvID(envID uint) (*domain.Project, error) { return nil, nil }
 
 type mockGitClient struct{}
 

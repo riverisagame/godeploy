@@ -1,11 +1,10 @@
 package application
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -33,9 +32,13 @@ type DeployEngine struct {
 
 	cancelFuncs map[uint]context.CancelFunc
 	cancelMu    sync.Mutex
+
+	dispatcher *WebhookDispatcher
+	runner     *PipelineRunner
 }
 
-func NewDeployEngine(sshClient SSHClient, gitClient GitClient, serverSvc *ServerService, deploySvc *DeployService) *DeployEngine {
+func NewDeployEngine(sshClient SSHClient, gitClient GitClient, serverSvc *ServerService, deploySvc *DeployService, dispatcher *WebhookDispatcher) *DeployEngine {
+	runner := NewPipelineRunner(sshClient, serverSvc)
 	return &DeployEngine{
 		sshClient:   sshClient,
 		gitClient:   gitClient,
@@ -45,6 +48,8 @@ func NewDeployEngine(sshClient SSHClient, gitClient GitClient, serverSvc *Server
 		logHistory:  make(map[uint][]string),
 		deployLocks: make(map[string]*sync.Mutex),
 		cancelFuncs: make(map[uint]context.CancelFunc),
+		dispatcher:  dispatcher,
+		runner:      runner,
 	}
 }
 
@@ -210,22 +215,31 @@ func (e *DeployEngine) runDeploySteps(ctx context.Context, deployment *domain.De
 	defer lock.Unlock()
 
 	// @Ref: docs/sps/plans/20260721_v2.5_refactoring_ir.md Task 3.4 | @Date: 2026-07-22
+	if DeployRunningCurrent != nil {
+		DeployRunningCurrent.Inc()
+	}
+	startTime := time.Now()
 	success := false
 	defer func() {
-		if env.NotifyWebhook != "" {
-			go func(url string, isSuccess bool) {
-				status := "failed"
-				if isSuccess {
-					status = "success"
-				}
-				payload, _ := json.Marshal(map[string]interface{}{
-					"project": project.Name,
-					"env":     env.Name,
-					"status":  status,
-				})
-				client := &http.Client{Timeout: 5 * time.Second}
-				_, _ = client.Post(url, "application/json", bytes.NewBuffer(payload))
-			}(env.NotifyWebhook, success)
+		if DeployRunningCurrent != nil {
+			DeployRunningCurrent.Dec()
+		}
+		status := "failed"
+		if success {
+			status = "success"
+		}
+		if DeployTotal != nil {
+			DeployTotal.WithLabelValues(fmt.Sprintf("%d", project.ID), status).Inc()
+			DeployDuration.WithLabelValues(fmt.Sprintf("%d", project.ID), status).Observe(time.Since(startTime).Seconds())
+		}
+
+		if env.NotifyWebhook != "" && e.dispatcher != nil {
+			payload, _ := json.Marshal(map[string]interface{}{
+				"project": project.Name,
+				"env":     env.Name,
+				"status":  status,
+			})
+			e.dispatcher.Dispatch(WebhookEvent{URL: env.NotifyWebhook, Payload: payload})
 		}
 	}()
 
@@ -256,6 +270,39 @@ func (e *DeployEngine) runDeploySteps(ctx context.Context, deployment *domain.De
 		workspacePath = "/tmp/test-workspace"
 	}
 
+	// 2. Load Pipeline or fallback to default
+	var pipeline *domain.Pipeline
+	yamlFile := fmt.Sprintf("%s/.pdeploy.yml", workspacePath)
+	data, readErr := os.ReadFile(yamlFile)
+	if readErr == nil {
+		pipeline, err = domain.ParsePipeline(data)
+		if err != nil {
+			e.broadcastLog(deployment.ID, fmt.Sprintf("ERROR: 解析 .pdeploy.yml 失败: %v\n", err))
+			if e.deploySvc != nil {
+				_ = e.deploySvc.CompleteDeploy(deployment.ID, false, e.GetLogHistory(deployment.ID), "")
+			}
+			return
+		}
+		e.broadcastLog(deployment.ID, ">>> 检测到 .pdeploy.yml，使用声明式流水线...\n")
+	} else {
+		e.broadcastLog(deployment.ID, ">>> 未检测到 .pdeploy.yml，使用默认流水线...\n")
+		// @Ref: docs/sps/plans/20260722_v3.0_pipeline_ir.md | @Date: 2026-07-22
+		pipeline = &domain.Pipeline{
+			Stages: []string{"deploy", "post_deploy"},
+			Tasks: map[string]*domain.TaskConfig{
+				"sync_code": {Stage: "deploy", Type: "sync"},
+			},
+		}
+		if env.PostDeploy != "" {
+			pipeline.Tasks["post_script"] = &domain.TaskConfig{
+				Stage:  "post_deploy",
+				Type:   "script",
+				RunOn:  "remote",
+				Script: []string{env.PostDeploy},
+			}
+		}
+	}
+
 	if ctx.Err() != nil {
 		e.broadcastLog(deployment.ID, "ERROR: Deploy cancelled before sync.\n")
 		if e.deploySvc != nil {
@@ -266,40 +313,16 @@ func (e *DeployEngine) runDeploySteps(ctx context.Context, deployment *domain.De
 
 	releaseName := fmt.Sprintf("release_%d", time.Now().UnixNano())
 
-	// 2. Sync to Servers
-	for _, srvID := range env.ServerIDs {
-		var srv *domain.Server
-		if e.serverSvc != nil {
-			srv, err = e.serverSvc.GetServerByID(srvID)
-			if err != nil || srv == nil {
-				e.broadcastLog(deployment.ID, fmt.Sprintf("ERROR: Server %d not found.\n", srvID))
-				continue
-			}
-		} else {
-			srv = &domain.Server{ID: srvID, Name: fmt.Sprintf("TestServer-%d", srvID)}
+	// 3. Run Pipeline
+	err = e.runner.Run(ctx, pipeline, workspacePath, releaseName, env, deployment.ID, func(msg string) {
+		e.broadcastLog(deployment.ID, msg)
+	})
+
+	if err != nil {
+		if e.deploySvc != nil {
+			_ = e.deploySvc.CompleteDeploy(deployment.ID, false, e.GetLogHistory(deployment.ID), "")
 		}
-
-		e.broadcastLog(deployment.ID, fmt.Sprintf(">>> 同步代码到服务器 %s...\n", srv.Name))
-
-		remoteReleasePath := fmt.Sprintf("%s/releases/%s", env.DeployPath, releaseName)
-
-		if e.sshClient != nil {
-			err = e.sshClient.SyncFiles(srv, workspacePath, remoteReleasePath, "", logChan)
-			if err != nil {
-				e.broadcastLog(deployment.ID, fmt.Sprintf("ERROR: Sync failed: %v\n", err))
-				continue
-			}
-
-			// Handle symlink
-			if env.DeployType == "symlink" {
-				currentLink := fmt.Sprintf("%s/current", env.DeployPath)
-				tmpLink := fmt.Sprintf("%s/current_tmp_%d", env.DeployPath, time.Now().UnixNano())
-				symlinkCmd := fmt.Sprintf("ln -sfn %s %s && mv -Tf %s %s", remoteReleasePath, tmpLink, tmpLink, currentLink)
-				_ = e.sshClient.RunCommand(srv, symlinkCmd, logChan)
-			}
-		} else {
-			e.broadcastLog(deployment.ID, "Test mode: skipping ssh sync.\n")
-		}
+		return
 	}
 
 	if e.deploySvc != nil {

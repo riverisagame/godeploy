@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/riverisagame/godeploy/internal/application"
 )
 
 type contextKey string
@@ -154,4 +155,31 @@ func RespondError(w http.ResponseWriter, code int, message string) {
 	if _, err := w.Write([]byte(`{"code":` + fmt.Sprintf("%d", code) + `,"error":"` + message + `"}` + "\n")); err != nil {
 		log.Printf("Failed to write error response: %v\n", err)
 	}
+}
+
+type AuditMiddleware struct {
+	svc application.AuditService
+}
+
+func NewAuditMiddleware(svc application.AuditService) *AuditMiddleware {
+	return &AuditMiddleware{svc: svc}
+}
+
+func (m *AuditMiddleware) Wrap(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		isMutating := r.Method == "POST" || r.Method == "PUT" || r.Method == "DELETE"
+
+		if !isMutating {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+
+		go func(method, path string, ctx context.Context) {
+			userID, _ := ctx.Value(ContextKeyUserID).(float64)
+			role, _ := ctx.Value(ContextKeyRole).(string)
+			_ = m.svc.RecordAction(context.Background(), int64(userID), role, method, path, "")
+		}(r.Method, r.URL.Path, r.Context())
+	})
 }

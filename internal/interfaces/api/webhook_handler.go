@@ -52,19 +52,36 @@ func (h *WebhookHandler) HandleGitHubPush(w http.ResponseWriter, r *http.Request
 	}
 	defer r.Body.Close()
 
-	signature := r.Header.Get("X-Hub-Signature-256")
-	if signature == "" || project.WebhookSecret == "" {
-		RespondError(w, http.StatusForbidden, "missing signature or secret")
+	githubSig := r.Header.Get("X-Hub-Signature-256")
+	gitlabToken := r.Header.Get("X-Gitlab-Token")
+	giteeToken := r.Header.Get("X-Gitee-Token")
+
+	if project.WebhookSecret == "" {
+		RespondError(w, http.StatusForbidden, "missing secret")
 		return
 	}
 
-	mac := hmac.New(sha256.New, []byte(project.WebhookSecret))
-	mac.Write(body)
-	expectedMAC := mac.Sum(nil)
-	expectedSignature := "sha256=" + hex.EncodeToString(expectedMAC)
+	valid := false
+	if githubSig != "" {
+		mac := hmac.New(sha256.New, []byte(project.WebhookSecret))
+		mac.Write(body)
+		expectedMAC := mac.Sum(nil)
+		expectedSignature := "sha256=" + hex.EncodeToString(expectedMAC)
+		if subtle.ConstantTimeCompare([]byte(githubSig), []byte(expectedSignature)) == 1 {
+			valid = true
+		}
+	} else if gitlabToken != "" {
+		if subtle.ConstantTimeCompare([]byte(gitlabToken), []byte(project.WebhookSecret)) == 1 {
+			valid = true
+		}
+	} else if giteeToken != "" {
+		if subtle.ConstantTimeCompare([]byte(giteeToken), []byte(project.WebhookSecret)) == 1 {
+			valid = true
+		}
+	}
 
-	if subtle.ConstantTimeCompare([]byte(signature), []byte(expectedSignature)) != 1 {
-		RespondError(w, http.StatusForbidden, "invalid signature")
+	if !valid {
+		RespondError(w, http.StatusForbidden, "invalid signature or token")
 		return
 	}
 

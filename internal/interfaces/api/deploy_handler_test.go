@@ -23,6 +23,7 @@ func (m *mockDeployRepo) Save(d *domain.Deployment) error {
 }
 func (m *mockDeployRepo) FindByID(id uint) (*domain.Deployment, error)         { return nil, nil }
 func (m *mockDeployRepo) FindByEnvID(envID uint) ([]*domain.Deployment, error) { return nil, nil }
+func (m *mockDeployRepo) FindByStatus(status string) ([]*domain.Deployment, error) { return nil, nil }
 func (m *mockDeployRepo) Update(d *domain.Deployment) error                    { return nil }
 
 type mockProjectRepo struct{}
@@ -43,6 +44,7 @@ func (m *mockProjectRepo) FindAll() ([]*domain.Project, error) {
 	}, nil
 }
 func (m *mockProjectRepo) Delete(id uint) error { return nil }
+func (m *mockProjectRepo) FindProjectByEnvID(envID uint) (*domain.Project, error) { return nil, nil }
 
 func TestDeployHandler_StartDeploy_UsesEnvID(t *testing.T) {
 	deployRepo := &mockDeployRepo{}
@@ -56,9 +58,10 @@ func TestDeployHandler_StartDeploy_UsesEnvID(t *testing.T) {
 	// We'll skip the engine start by letting it panic in goroutine or just ignoring it for now.
 	// Actually, StartDeploy calls h.engine.StartDeploy which will panic if engine is nil.
 	// So we create a dummy engine.
-	engine := application.NewDeployEngine(nil, nil, nil, deploySvc)
+	engine := application.NewDeployEngine(nil, nil, nil, deploySvc, nil)
 
-	handler := api.NewDeployHandler(deploySvc, engine, prjSvc)
+	scheduler := application.NewDeployScheduler(deployRepo, prjRepo, engine)
+	handler := api.NewDeployHandler(deploySvc, engine, prjSvc, scheduler)
 
 	reqBody := map[string]interface{}{
 		"project_id":  100,

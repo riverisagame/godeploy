@@ -40,13 +40,13 @@ func TestDeployEngine_DependencyInversion(t *testing.T) {
 	gitClient := &mockGitClient{}
 
 	// Should accept interfaces and ServerService, not concrete types or Repo directly
-	_ = application.NewDeployEngine(sshClient, gitClient, nil, nil)
+	_ = application.NewDeployEngine(sshClient, gitClient, nil, nil, nil)
 }
 
 func TestDeployEngine_Subscribe_ReceivesHistory(t *testing.T) {
 	// Task 1.3 RED Test
 	deploySvc := application.NewDeployService(nil, nil, nil)
-	engine := application.NewDeployEngine(nil, nil, nil, deploySvc)
+	engine := application.NewDeployEngine(nil, nil, nil, deploySvc, nil)
 
 	depID := uint(999)
 

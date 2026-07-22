@@ -45,6 +45,7 @@ func main() {
 		&persistence.ServerModel{},
 		&persistence.DeploymentModel{},
 		&persistence.UserModel{},
+		&persistence.AuditLogModel{},
 	)
 	if err != nil {
 		log.Fatal("Failed to auto-migrate:", err)
@@ -53,6 +54,7 @@ func main() {
 	projectRepo := persistence.NewSqliteProjectRepository(db)
 	serverRepo := persistence.NewSqliteServerRepository(db)
 	deployRepo := persistence.NewSqliteDeploymentRepository(db)
+	auditRepo := persistence.NewAuditRepository(db)
 
 	// 2. Initialize Application Services
 	projectSvc := application.NewProjectService(projectRepo)
@@ -71,10 +73,20 @@ func main() {
 	serverSvc := application.NewServerService(serverRepo, projectRepo)
 
 	deploySvc := application.NewDeployService(deployRepo, projectRepo, gitClient)
-	deployEngine := application.NewDeployEngine(sshClient, gitClient, serverSvc, deploySvc)
+
+	application.InitMetrics()
+	webhookDispatcher := application.NewWebhookDispatcher()
+	webhookDispatcher.Start()
+
+	deployEngine := application.NewDeployEngine(sshClient, gitClient, serverSvc, deploySvc, webhookDispatcher)
+	auditSvc := application.NewAuditService(auditRepo)
+	
+	scheduler := application.NewDeployScheduler(deployRepo, projectRepo, deployEngine)
+	scheduler.Recover()
+	scheduler.Start(context.Background())
 
 	// 3. Initialize Interfaces
-	router := api.NewRouter(projectSvc, serverSvc, deploySvc, deployEngine, authSvc, userSvc, pdeploy.StaticFS, cfg.JWTSecret)
+	router := api.NewRouter(projectSvc, serverSvc, deploySvc, deployEngine, authSvc, userSvc, auditSvc, scheduler, pdeploy.StaticFS, cfg.JWTSecret)
 
 	addr := ":" + cfg.Port
 	srv := &http.Server{

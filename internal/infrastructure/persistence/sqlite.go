@@ -156,3 +156,14 @@ func (r *SqliteProjectRepository) Delete(id uint) error {
 	// GORM's OnDelete:CASCADE on ProjectModel.Environments will handle associated records
 	return r.db.Delete(&ProjectModel{}, id).Error
 }
+
+func (r *SqliteProjectRepository) FindProjectByEnvID(envID uint) (*domain.Project, error) {
+	var em EnvironmentModel
+	if err := r.db.First(&em, envID).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return r.FindByID(em.ProjectID)
+}

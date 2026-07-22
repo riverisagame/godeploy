@@ -92,7 +92,6 @@ func TestClient_FetchAndGetCommits(t *testing.T) {
 		t.Errorf("expected bare repository, got core.bare=%s", string(out))
 	}
 
-
 	// 测试带 fromCommit (获取第二条以后的)
 	// 假设我们取第一个返回的 hash 作为 target，看看能不能获取增量
 	if len(commits) >= 2 {

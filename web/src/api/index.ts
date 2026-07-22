@@ -32,4 +32,7 @@ export const api = {
   createServer: (data: Partial<Server>) => request.post<Server>('/servers', data),
   updateServer: (id: number | string, data: Partial<Server>) => request.put<Server>(`/servers/${id}`, data),
   deleteServer: (id: number | string) => request.delete(`/servers/${id}`),
+
+  // Audit Logs
+  getAuditLogs: (page: number, pageSize: number) => request.get('/audit-logs', { params: { page, pageSize } }),
 }

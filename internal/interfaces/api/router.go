@@ -2,10 +2,12 @@ package api
 
 import (
 	"embed"
-	"github.com/riverisagame/godeploy/internal/application"
 	"io/fs"
 	"net/http"
 	"strings"
+
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/riverisagame/godeploy/internal/application"
 )
 
 func NewRouter(
@@ -15,6 +17,8 @@ func NewRouter(
 	deployEngine *application.DeployEngine,
 	authSvc *application.AuthService,
 	userSvc *application.UserService,
+	auditSvc application.AuditService,
+	scheduler *application.DeployScheduler,
 	staticFS embed.FS,
 	jwtSecret string,
 ) http.Handler {
@@ -22,21 +26,23 @@ func NewRouter(
 
 	projectHandler := NewProjectHandler(projectSvc)
 	serverHandler := NewServerHandler(serverSvc)
-	deployHandler := NewDeployHandler(deploySvc, deployEngine, projectSvc)
+	deployHandler := NewDeployHandler(deploySvc, deployEngine, projectSvc, scheduler)
 	authHandler := NewAuthHandler(authSvc)
 	userHandler := NewUserHandler(userSvc)
+	auditHandler := NewAuditHandler(auditSvc)
 	authMiddleware := NewAuthMiddleware(jwtSecret)
+	auditMiddleware := NewAuditMiddleware(auditSvc)
 
 	// Public Routes
 	mux.HandleFunc("POST /api/login", authHandler.Login)
 
 	// Helper to wrap handlers
 	protect := func(h http.HandlerFunc) http.HandlerFunc {
-		return authMiddleware.Wrap(h).ServeHTTP
+		return authMiddleware.Wrap(auditMiddleware.Wrap(h)).ServeHTTP
 	}
 
 	adminProtect := func(h http.HandlerFunc) http.HandlerFunc {
-		return authMiddleware.Wrap(RequireAdmin(h)).ServeHTTP
+		return authMiddleware.Wrap(RequireAdmin(auditMiddleware.Wrap(h))).ServeHTTP
 	}
 
 	// Project Routes
@@ -48,6 +54,9 @@ func NewRouter(
 	// User Routes
 	mux.HandleFunc("GET /api/users", adminProtect(userHandler.List))
 	mux.HandleFunc("POST /api/users", adminProtect(userHandler.Create))
+
+	// Audit Routes
+	mux.HandleFunc("GET /api/audit-logs", adminProtect(auditHandler.GetAuditLogs))
 
 	// Environment Routes
 	mux.HandleFunc("POST /api/projects/{id}/environments", adminProtect(projectHandler.AddEnvironment))
@@ -71,6 +80,9 @@ func NewRouter(
 
 	// Webhooks
 	mux.HandleFunc("POST /api/webhook/github/{project_id}", webhookHandler.HandleGitHubPush)
+
+	// Metrics Route
+	mux.Handle("GET /metrics", promhttp.Handler())
 
 	// Setup embedded static files
 	distFS, err := fs.Sub(staticFS, "web/dist")
@@ -111,5 +123,6 @@ func NewRouter(
 	handler = CORS(handler)
 	handler = loggingMiddleware.Wrap(handler)
 	handler = recoveryMiddleware.Wrap(handler)
+	handler = MetricsMiddleware(handler)
 	return handler
 }
