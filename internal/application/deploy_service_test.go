@@ -1,6 +1,7 @@
 package application
 
 import (
+	"context"
 	"github.com/riverisagame/godeploy/internal/domain"
 	"testing"
 )
@@ -53,15 +54,15 @@ func (m *mockDeployProjectRepo) FindProjectByEnvID(envID uint) (*domain.Project,
 
 type mockGitClient struct{}
 
-func (m *mockGitClient) CloneForDeploy(repoURL, branch, projectName string, deployID uint, logChan chan<- string) (string, error) {
+func (m *mockGitClient) CloneForDeploy(ctx context.Context, repoURL, branch, projectName string, deployID uint, logChan chan<- string) (string, error) {
 	return "/tmp/mock", nil
 }
 
-func (m *mockGitClient) CleanupDeploy(projectName string, deployID uint, deployPath string) error {
+func (m *mockGitClient) CleanupDeploy(ctx context.Context, projectName string, deployID uint, deployPath string) error {
 	return nil
 }
 
-func (m *mockGitClient) FetchAndGetCommits(repoURL, branch, projectName, fromCommit string) ([]domain.CommitInfo, error) {
+func (m *mockGitClient) FetchAndGetCommits(ctx context.Context, repoURL, branch, projectName, fromCommit string) ([]domain.CommitInfo, error) {
 	return []domain.CommitInfo{{Hash: "123", Message: "test"}}, nil
 }
 

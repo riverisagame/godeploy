@@ -1,6 +1,7 @@
 package application
 
 import (
+	"context"
 	"errors"
 	"github.com/riverisagame/godeploy/internal/domain"
 )
@@ -91,5 +92,5 @@ func (s *DeployService) GetEnvironmentDiff(projectID uint, envName string) ([]do
 	}
 
 	// Fetch diff
-	return s.gitClient.FetchAndGetCommits(proj.RepoURL, env.Branch, proj.Name, fromCommit)
+	return s.gitClient.FetchAndGetCommits(context.Background(), proj.RepoURL, env.Branch, proj.Name, fromCommit)
 }

@@ -22,7 +22,7 @@
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="220" fixed="right">
+      <el-table-column label="操作" width="280" fixed="right">
         <template #default="scope">
           <el-button link type="primary" size="small" @click="viewLog(scope.row.id)">日志</el-button>
           <el-button link type="danger" size="small" v-if="admin && scope.row.status === 'success'" @click="rollback(scope.row)">

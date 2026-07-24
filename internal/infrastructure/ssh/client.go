@@ -2,6 +2,7 @@ package ssh
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"github.com/riverisagame/godeploy/internal/domain"
 	"io"
@@ -73,7 +74,8 @@ func (c *Client) buildConfig(server *domain.Server) (*ssh.ClientConfig, error) {
 }
 
 // RunCommand 在远程服务器执行命令，输出流式写入 logChan
-func (c *Client) RunCommand(server *domain.Server, cmd string, logChan chan<- string) error {
+// @Ref: docs/sps/plans/20260724_backend_timeout_ir.md Task 2.1 | @Date: 2026-07-24
+func (c *Client) RunCommand(ctx context.Context, server *domain.Server, cmd string, logChan chan<- string) error {
 	config, err := c.buildConfig(server)
 	if err != nil {
 		return err
@@ -93,6 +95,17 @@ func (c *Client) RunCommand(server *domain.Server, cmd string, logChan chan<- st
 		return err
 	}
 	defer func() { _ = session.Close() }()
+
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		select {
+		case <-ctx.Done():
+			logChan <- "[SSH] Command cancelled or timed out, closing session...\n"
+			_ = session.Close()
+		case <-done:
+		}
+	}()
 
 	stdout, err := session.StdoutPipe()
 	if err != nil {
@@ -118,11 +131,12 @@ func (c *Client) RunCommand(server *domain.Server, cmd string, logChan chan<- st
 }
 
 // SyncFiles 使用 rsync 将本地目录同步到远程服务器
-func (c *Client) SyncFiles(server *domain.Server, localPath, remotePath, linkDest string, logChan chan<- string) error {
+// @Ref: docs/sps/plans/20260724_backend_timeout_ir.md Task 2.2 | @Date: 2026-07-24
+func (c *Client) SyncFiles(ctx context.Context, server *domain.Server, localPath, remotePath, linkDest string, logChan chan<- string) error {
 	if runtime.GOOS == "windows" {
 		// Windows 下无 rsync，使用 scp 回退方案
 		logChan <- "[Sync] Windows detected, using scp fallback...\n"
-		return c.scpFallback(server, localPath, remotePath, logChan)
+		return c.scpFallback(ctx, server, localPath, remotePath, logChan)
 	}
 
 	user := server.User
@@ -155,7 +169,7 @@ func (c *Client) SyncFiles(server *domain.Server, localPath, remotePath, linkDes
 
 	logChan <- fmt.Sprintf("[Sync] rsync %s -> %s@%s:%s\n", localPath, user, server.IP, remotePath)
 
-	cmd := exec.Command("rsync", rsyncArgs...)
+	cmd := exec.CommandContext(ctx, "rsync", rsyncArgs...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return err
@@ -176,7 +190,7 @@ func (c *Client) SyncFiles(server *domain.Server, localPath, remotePath, linkDes
 }
 
 // scpFallback Windows 下使用 scp 替代 rsync
-func (c *Client) scpFallback(server *domain.Server, localPath, remotePath string, logChan chan<- string) error {
+func (c *Client) scpFallback(ctx context.Context, server *domain.Server, localPath, remotePath string, logChan chan<- string) error {
 	user := server.User
 	if user == "" {
 		user = "root"
@@ -193,7 +207,7 @@ func (c *Client) scpFallback(server *domain.Server, localPath, remotePath string
 
 	logChan <- fmt.Sprintf("[Sync] scp %s -> %s@%s:%s\n", localPath, user, server.IP, remotePath)
 
-	cmd := exec.Command("scp", scpArgs...)
+	cmd := exec.CommandContext(ctx, "scp", scpArgs...)
 	out, err := cmd.CombinedOutput()
 	if len(out) > 0 {
 		logChan <- "[Sync] " + string(out) + "\n"

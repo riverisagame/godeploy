@@ -2,6 +2,7 @@ package git
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"github.com/riverisagame/godeploy/internal/domain"
 	"os"
@@ -31,7 +32,7 @@ func (c *Client) getLock(projectName string) *sync.Mutex {
 // CloneForDeploy prepares a deployment workspace using a git bare repo and worktree.
 // This allows O(1) concurrent checkouts and caches the repo locally.
 // @Ref: docs/sps/plans/20260721_v2.5_refactoring_ir.md | @Date: 2026-07-21
-func (c *Client) CloneForDeploy(repoURL, branch, projectName string, deployID uint, logChan chan<- string) (string, error) {
+func (c *Client) CloneForDeploy(ctx context.Context, repoURL, branch, projectName string, deployID uint, logChan chan<- string) (string, error) {
 	lock := c.getLock(projectName)
 	lock.Lock()
 	defer lock.Unlock()
@@ -40,19 +41,19 @@ func (c *Client) CloneForDeploy(repoURL, branch, projectName string, deployID ui
 	deployPath := filepath.Join(c.workspaceBase, fmt.Sprintf("%s_deploy_%d", projectName, deployID))
 
 	// 1. Ensure bare repo exists
-	if err := c.ensureBareRepo(repoURL, bareRepoPath, logChan); err != nil {
+	if err := c.ensureBareRepo(ctx, repoURL, bareRepoPath, logChan); err != nil {
 		return "", err
 	}
 
 	// 2. Remove existing worktree if left over
 	if _, err := os.Stat(deployPath); err == nil {
 		_ = os.RemoveAll(deployPath)
-		_ = c.runGit(bareRepoPath, logChan, "worktree", "prune")
+		_ = c.runGit(ctx, bareRepoPath, logChan, "worktree", "prune")
 	}
 
 	// 3. Create worktree detached at target branch
 	logChan <- fmt.Sprintf("[Git] Checking out branch %s to worktree...\n", branch)
-	if err := c.runGit(bareRepoPath, logChan, "worktree", "add", "--detach", deployPath, branch); err != nil {
+	if err := c.runGit(ctx, bareRepoPath, logChan, "worktree", "add", "--detach", deployPath, branch); err != nil {
 		return "", fmt.Errorf("git worktree add failed: %w", err)
 	}
 
@@ -60,7 +61,7 @@ func (c *Client) CloneForDeploy(repoURL, branch, projectName string, deployID ui
 }
 
 // CleanupDeploy removes the temporary worktree after deployment finishes.
-func (c *Client) CleanupDeploy(projectName string, deployID uint, deployPath string) error {
+func (c *Client) CleanupDeploy(ctx context.Context, projectName string, deployID uint, deployPath string) error {
 	bareRepoPath := filepath.Join(c.workspaceBase, projectName+".git")
 
 	// Remove directory
@@ -70,7 +71,7 @@ func (c *Client) CleanupDeploy(projectName string, deployID uint, deployPath str
 
 	// Prune worktree
 	// We run it silently since logChan might be closed
-	cmd := exec.Command("git", "worktree", "prune")
+	cmd := exec.CommandContext(ctx, "git", "worktree", "prune")
 	cmd.Dir = bareRepoPath
 	_ = cmd.Run()
 
@@ -78,8 +79,8 @@ func (c *Client) CleanupDeploy(projectName string, deployID uint, deployPath str
 }
 
 // runGit 执行 git 命令并流式输出到 logChan
-func (c *Client) runGit(dir string, logChan chan<- string, args ...string) error {
-	cmd := exec.Command("git", args...)
+func (c *Client) runGit(ctx context.Context, dir string, logChan chan<- string, args ...string) error {
+	cmd := exec.CommandContext(ctx, "git", args...)
 	if dir != "" {
 		cmd.Dir = dir
 	}
@@ -106,7 +107,7 @@ func (c *Client) runGit(dir string, logChan chan<- string, args ...string) error
 
 // FetchAndGetCommits 拉取最新代码并获取从 fromCommit 到最新分支的提交记录
 // @Ref: docs/sps/plans/20260721_git_bare_unification_ir.md | @Date: 2026-07-21
-func (c *Client) FetchAndGetCommits(repoURL, branch, projectName, fromCommit string) ([]domain.CommitInfo, error) {
+func (c *Client) FetchAndGetCommits(ctx context.Context, repoURL, branch, projectName, fromCommit string) ([]domain.CommitInfo, error) {
 	lock := c.getLock(projectName)
 	lock.Lock()
 	defer lock.Unlock()
@@ -120,7 +121,7 @@ func (c *Client) FetchAndGetCommits(repoURL, branch, projectName, fromCommit str
 		}
 	}()
 
-	if err := c.ensureBareRepo(repoURL, bareRepoPath, logChan); err != nil {
+	if err := c.ensureBareRepo(ctx, repoURL, bareRepoPath, logChan); err != nil {
 		return nil, fmt.Errorf("ensure bare repo failed: %w", err)
 	}
 
@@ -131,7 +132,7 @@ func (c *Client) FetchAndGetCommits(repoURL, branch, projectName, fromCommit str
 		args = []string{"log", branch, "-n", "10", "--pretty=format:%H|%s|%an|%ad", "--date=iso"}
 	}
 
-	cmd := exec.Command("git", args...)
+	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = bareRepoPath
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -158,18 +159,18 @@ func (c *Client) FetchAndGetCommits(repoURL, branch, projectName, fromCommit str
 	return commits, nil
 }
 
-func (c *Client) ensureBareRepo(repoURL, bareRepoPath string, logChan chan<- string) error {
+func (c *Client) ensureBareRepo(ctx context.Context, repoURL, bareRepoPath string, logChan chan<- string) error {
 	if _, err := os.Stat(bareRepoPath); err != nil {
 		logChan <- fmt.Sprintf("[Git] Initialize bare repo %s...\n", repoURL)
 		if err := os.MkdirAll(bareRepoPath, 0755); err != nil {
 			return fmt.Errorf("mkdir bare repo failed: %w", err)
 		}
-		if err := c.runGit("", logChan, "clone", "--bare", repoURL, bareRepoPath); err != nil {
+		if err := c.runGit(ctx, "", logChan, "clone", "--bare", repoURL, bareRepoPath); err != nil {
 			return fmt.Errorf("git bare clone failed: %w", err)
 		}
 	} else {
 		logChan <- "[Git] Fetching latest from origin...\n"
-		if err := c.runGit(bareRepoPath, logChan, "fetch", "origin", "+refs/heads/*:refs/heads/*", "--prune"); err != nil {
+		if err := c.runGit(ctx, bareRepoPath, logChan, "fetch", "origin", "+refs/heads/*:refs/heads/*", "--prune"); err != nil {
 			logChan <- fmt.Sprintf("[Git] Fetch failed, ignoring... %v\n", err)
 		}
 	}

@@ -174,7 +174,8 @@ func (e *DeployEngine) Rollback(deployment *domain.Deployment, env *domain.Envir
 					e.broadcastLog(deployment.ID, msg)
 				}
 			}()
-			err = e.sshClient.RunCommand(srv, symlinkCmd, rollbackLogChan)
+			ctx := context.Background() // Rollback 默认不限制时间，或者后续加上超时机制
+			err = e.sshClient.RunCommand(ctx, srv, symlinkCmd, rollbackLogChan)
 			close(rollbackLogChan)
 			if err != nil {
 				e.broadcastLog(deployment.ID, fmt.Sprintf("ERROR: 回滚 Symlink 切换失败: %v\n", err))
@@ -196,7 +197,7 @@ func (e *DeployEngine) Rollback(deployment *domain.Deployment, env *domain.Envir
 						e.broadcastLog(deployment.ID, msg)
 					}
 				}()
-				_ = e.sshClient.RunCommand(srv, fmt.Sprintf("cd %s && %s", currentLink, safeCmd), hookLogChan)
+				_ = e.sshClient.RunCommand(context.Background(), srv, fmt.Sprintf("cd %s && %s", currentLink, safeCmd), hookLogChan)
 				close(hookLogChan)
 			}
 			e.broadcastLog(deployment.ID, fmt.Sprintf(">>> 服务器 %s 回滚成功。\n", srv.Name))
@@ -256,7 +257,7 @@ func (e *DeployEngine) runDeploySteps(ctx context.Context, deployment *domain.De
 	var workspacePath string
 	var err error
 	if e.gitClient != nil {
-		workspacePath, err = e.gitClient.CloneForDeploy(project.RepoURL, env.Branch, project.Name, deployment.ID, logChan)
+		workspacePath, err = e.gitClient.CloneForDeploy(ctx, project.RepoURL, env.Branch, project.Name, deployment.ID, logChan)
 		if err != nil {
 			e.broadcastLog(deployment.ID, fmt.Sprintf("ERROR: Git clone failed: %v\n", err))
 			if e.deploySvc != nil {
@@ -264,7 +265,7 @@ func (e *DeployEngine) runDeploySteps(ctx context.Context, deployment *domain.De
 			}
 			return
 		}
-		defer func() { _ = e.gitClient.CleanupDeploy(project.Name, deployment.ID, workspacePath) }()
+		defer func() { _ = e.gitClient.CleanupDeploy(ctx, project.Name, deployment.ID, workspacePath) }()
 	} else {
 		e.broadcastLog(deployment.ID, "Test mode: skipping git clone.\n")
 		workspacePath = "/tmp/test-workspace"

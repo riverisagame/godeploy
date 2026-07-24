@@ -89,7 +89,7 @@ func (r *PipelineRunner) handleSyncTask(ctx context.Context, workspacePath, rele
 		remoteReleasePath := fmt.Sprintf("%s/releases/%s", env.DeployPath, releaseName)
 
 		if r.sshClient != nil {
-			err = r.sshClient.SyncFiles(srv, workspacePath, remoteReleasePath, "", logChan)
+			err = r.sshClient.SyncFiles(ctx, srv, workspacePath, remoteReleasePath, "", logChan)
 			if err != nil {
 				logger(fmt.Sprintf("ERROR: Sync failed: %v\n", err))
 				continue
@@ -100,7 +100,7 @@ func (r *PipelineRunner) handleSyncTask(ctx context.Context, workspacePath, rele
 				currentLink := fmt.Sprintf("%s/current", env.DeployPath)
 				tmpLink := fmt.Sprintf("%s/current_tmp_%d", env.DeployPath, time.Now().UnixNano())
 				symlinkCmd := fmt.Sprintf("ln -sfn %s %s && mv -Tf %s %s", remoteReleasePath, tmpLink, tmpLink, currentLink)
-				_ = r.sshClient.RunCommand(srv, symlinkCmd, logChan)
+				_ = r.sshClient.RunCommand(ctx, srv, symlinkCmd, logChan)
 			}
 		} else {
 			logger("Test mode: skipping ssh sync.\n")
@@ -166,7 +166,7 @@ func (r *PipelineRunner) handleRemoteScript(ctx context.Context, config *domain.
 			
 			// Always run in current dir context
 			fullCmd := fmt.Sprintf("cd %s && %s", currentLink, cmdStr)
-			err = r.sshClient.RunCommand(srv, fullCmd, logChan)
+			err = r.sshClient.RunCommand(ctx, srv, fullCmd, logChan)
 			if err != nil {
 				logger(fmt.Sprintf("ERROR: Remote script failed: %v\n", err))
 				return err

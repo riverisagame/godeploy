@@ -1,6 +1,7 @@
 package application_test
 
 import (
+	"context"
 	"github.com/riverisagame/godeploy/internal/application"
 	"github.com/riverisagame/godeploy/internal/domain"
 	"testing"
@@ -12,26 +13,26 @@ type mockSSHClient struct {
 	synced bool
 }
 
-func (m *mockSSHClient) RunCommand(srv *domain.Server, cmd string, logChan chan<- string) error {
+func (m *mockSSHClient) RunCommand(ctx context.Context, srv *domain.Server, cmd string, logChan chan<- string) error {
 	m.cmds = append(m.cmds, cmd)
 	return nil
 }
-func (m *mockSSHClient) SyncFiles(server *domain.Server, localPath, remotePath, linkDest string, logChan chan<- string) error {
+func (m *mockSSHClient) SyncFiles(ctx context.Context, server *domain.Server, localPath, remotePath, linkDest string, logChan chan<- string) error {
 	m.synced = true
 	return nil
 }
 
 type mockGitClient struct{}
 
-func (m *mockGitClient) CloneForDeploy(r, b, p string, id uint, l chan<- string) (string, error) {
+func (m *mockGitClient) CloneForDeploy(ctx context.Context, r, b, p string, id uint, l chan<- string) (string, error) {
 	return "/tmp/mock", nil
 }
 
-func (m *mockGitClient) CleanupDeploy(p string, id uint, dp string) error {
+func (m *mockGitClient) CleanupDeploy(ctx context.Context, p string, id uint, dp string) error {
 	return nil
 }
 
-func (m *mockGitClient) FetchAndGetCommits(r, b, p, f string) ([]domain.CommitInfo, error) {
+func (m *mockGitClient) FetchAndGetCommits(ctx context.Context, r, b, p, f string) ([]domain.CommitInfo, error) {
 	return []domain.CommitInfo{{Hash: "123"}}, nil
 }
 
