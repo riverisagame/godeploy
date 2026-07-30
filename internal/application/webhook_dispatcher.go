@@ -52,7 +52,8 @@ func (w *WebhookDispatcher) sendWithRetry(event WebhookEvent) {
 		resp, err := client.Do(req)
 		
 		if err == nil {
-			defer resp.Body.Close()
+			// @Ref: docs/sps/plans/20260730_bugfix_plan.md | @Date: 2026-07-30
+			defer func() { _ = resp.Body.Close() }()
 			if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 				return // Success
 			}

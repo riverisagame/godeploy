@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: godeploy-config
+data:
+  PORT: "8080"
+  DB_PATH: "/app/data/pdeploy.db"
+  WORKSPACE_DIR: "/app/workspace"

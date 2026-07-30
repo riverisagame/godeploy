@@ -17,3 +17,8 @@
 | 2026-07-21 | TASK-8 | UI | - | 修复构建历史弹窗展示（不截断等） |
 | 20260724 | TASK-9 | Backend | docs/sps/plans/20260724_backend_timeout_ir.md | [BUILD_SUCCESS] SSHClient 健壮性与超时控制重构 |
 | 20260724 | TASK-10 | Backend | docs/sps/plans/20260724_backend_timeout_ir.md | [BUILD_SUCCESS] GitClient 健壮性与超时控制重构 |
+| 2026-07-30 | AUDIT-1 | 全局架构 | docs/sps/decisions/20260730_production_readiness_audit.md | SCAN |
+| 2026-07-30 | PLAN-1 | 自动回滚 | docs/sps/plans/20260730_rollback_plan.md | PLAN_LOCKED |
+| 2026-07-30 | FINISH-1 | 验收 | docs/sps/logs/20260730_build_test.md | VERIFYING |
+| 2026-07-30 | BUGFIX_LINT | Linter/Quality | docs/sps/plans/20260730_bugfix_plan.md | DONE |
+| 2026-07-30 | INFRA_K8S | DevOps | docs/sps/plans/20260730_infra_plan.md | DONE |

@@ -52,9 +52,11 @@ func (r *PipelineRunner) runTask(ctx context.Context, taskName string, config *d
 	}
 
 	if config.Type == "script" {
-		if config.RunOn == "local" {
+		// @Ref: docs/sps/plans/20260730_bugfix_plan.md | @Date: 2026-07-30
+		switch config.RunOn {
+		case "local":
 			return r.handleLocalScript(ctx, config, workspacePath, logger)
-		} else if config.RunOn == "remote" {
+		case "remote":
 			return r.handleRemoteScript(ctx, config, releaseName, env, logger)
 		}
 	}

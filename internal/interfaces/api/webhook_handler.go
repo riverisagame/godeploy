@@ -50,7 +50,8 @@ func (h *WebhookHandler) HandleGitHubPush(w http.ResponseWriter, r *http.Request
 		RespondError(w, http.StatusInternalServerError, "failed to read body")
 		return
 	}
-	defer r.Body.Close()
+	// @Ref: docs/sps/plans/20260730_bugfix_plan.md | @Date: 2026-07-30
+	defer func() { _ = r.Body.Close() }()
 
 	githubSig := r.Header.Get("X-Hub-Signature-256")
 	gitlabToken := r.Header.Get("X-Gitlab-Token")

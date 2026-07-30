@@ -30,7 +30,8 @@ func (s *DeployScheduler) Recover() {
 
 	for _, d := range deployments {
 		d.MarkFailed("deployment crashed due to application restart or scheduler interruption.")
-		s.repo.Save(d)
+		// @Ref: docs/sps/plans/20260730_bugfix_plan.md | @Date: 2026-07-30
+		_ = s.repo.Save(d)
 	}
 }
 
@@ -57,7 +58,8 @@ func (s *DeployScheduler) processDeployment(deployID uint) {
 	p, err := s.projectRepo.FindProjectByEnvID(d.EnvID)
 	if err != nil || p == nil {
 		d.MarkFailed("project or environment not found")
-		s.repo.Save(d)
+		// @Ref: docs/sps/plans/20260730_bugfix_plan.md | @Date: 2026-07-30
+		_ = s.repo.Save(d)
 		return
 	}
 
@@ -70,14 +72,16 @@ func (s *DeployScheduler) processDeployment(deployID uint) {
 	}
 	if env == nil {
 		d.MarkFailed("environment not found in project")
-		s.repo.Save(d)
+		// @Ref: docs/sps/plans/20260730_bugfix_plan.md | @Date: 2026-07-30
+		_ = s.repo.Save(d)
 		return
 	}
 
 	// Execute the deployment or rollback
 	if s.engine != nil {
 		d.SetPhase("running")
-		s.repo.Save(d)
+		// @Ref: docs/sps/plans/20260730_bugfix_plan.md | @Date: 2026-07-30
+		_ = s.repo.Save(d)
 		if len(d.CommitHash) > 12 && d.CommitHash[:12] == "ROLLBACK_TO_" {
 			targetRelease := d.CommitHash[12:]
 			s.engine.Rollback(d, env, targetRelease)

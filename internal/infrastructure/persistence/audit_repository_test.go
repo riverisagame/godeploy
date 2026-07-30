@@ -60,4 +60,6 @@ func TestAuditRepository(t *testing.T) {
 	logs, total, err = repo.List(ctx, 1, 10)
 	assert.NoError(t, err)
 	assert.Equal(t, int64(1), total) // Should only have 1 log remaining
+	// @Ref: docs/sps/plans/20260730_bugfix_plan.md | @Date: 2026-07-30
+	assert.Len(t, logs, 1)
 }

@@ -1,0 +1,38 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: godeploy
+spec:
+  replicas: 1 # Must be 1 to prevent SQLite lock contention
+  selector:
+    matchLabels:
+      app: godeploy
+  template:
+    metadata:
+      labels:
+        app: godeploy
+    spec:
+      containers:
+        - name: godeploy
+          image: godeploy:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: godeploy-config
+          # JWT_SECRET should be provided via a Secret in production
+          env:
+            - name: JWT_SECRET
+              value: "changeme_in_production_12345"
+          volumeMounts:
+            - name: storage
+              mountPath: /app/data
+              subPath: data
+            - name: storage
+              mountPath: /app/workspace
+              subPath: workspace
+      volumes:
+        - name: storage
+          persistentVolumeClaim:
+            claimName: godeploy-pvc
